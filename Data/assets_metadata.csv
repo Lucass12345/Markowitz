@@ -1,42 +1,47 @@
-ticker,asset_class
-GGAL.BA,Argentina Equity
-YPFD.BA,Argentina Equity
-PAMP.BA,Argentina Equity
-TXAR.BA,Argentina Equity
-ALUA.BA,Argentina Equity
-CEPU.BA,Argentina Equity
-LOMA.BA,Argentina Equity
-BMA.BA,Argentina Equity
-BBAR.BA,Argentina Equity
-SUPV.BA,Argentina Equity
-COME.BA,Argentina Equity
-EDN.BA,Argentina Equity
-TGNO4.BA,Argentina Equity
-TGSU2.BA,Argentina Equity
-VALO.BA,Argentina Equity
-AAPL,US Equity
-MSFT,US Equity
-AMZN,US Equity
-GOOGL,US Equity
-META,US Equity
-NVDA,US Equity
-TSLA,US Equity
-BRK-B,US Equity
-JPM,US Equity
-V,US Equity
-MA,US Equity
-KO,US Equity
-PEP,US Equity
-XOM,US Equity
-UNH,US Equity
-SPY,ETF
-QQQ,ETF
-IWM,ETF
-EEM,ETF
-EFA,ETF
-GLD,ETF
-SLV,ETF
-TLT,ETF
-IEF,ETF
-HYG,ETF
-VNQ,ETF
+ticker,asset_class,block
+GGAL.BA,Argentina Equity,AR
+YPFD.BA,Argentina Equity,AR
+PAMP.BA,Argentina Equity,AR
+TXAR.BA,Argentina Equity,AR
+ALUA.BA,Argentina Equity,AR
+CEPU.BA,Argentina Equity,AR
+LOMA.BA,Argentina Equity,AR
+BMA.BA,Argentina Equity,AR
+BBAR.BA,Argentina Equity,AR
+SUPV.BA,Argentina Equity,AR
+COME.BA,Argentina Equity,AR
+EDN.BA,Argentina Equity,AR
+TGNO4.BA,Argentina Equity,AR
+TGSU2.BA,Argentina Equity,AR
+VALO.BA,Argentina Equity,AR
+
+AAPL,US Equity,US
+MSFT,US Equity,US
+AMZN,US Equity,US
+GOOGL,US Equity,US
+META,US Equity,US
+NVDA,US Equity,US
+TSLA,US Equity,US
+BRK-B,US Equity,US
+JPM,US Equity,US
+V,US Equity,US
+MA,US Equity,US
+KO,US Equity,US
+PEP,US Equity,US
+XOM,US Equity,US
+UNH,US Equity,US
+
+SPY,ETF,FUNDS_EQUITY
+QQQ,ETF,FUNDS_EQUITY
+IWM,ETF,FUNDS_EQUITY
+EEM,ETF,FUNDS_EQUITY
+EFA,ETF,FUNDS_EQUITY
+VNQ,ETF,FUNDS_EQUITY
+
+TLT,ETF,FUNDS_BONDS
+IEF,ETF,FUNDS_BONDS
+HYG,ETF,FUNDS_BONDS
+
+GLD,ETF,GOLD
+
+
