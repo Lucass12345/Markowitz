@@ -12,16 +12,16 @@ from src.markowitz import max_sharpe_with_blocks, min_variance_with_blocks
 BLOCKS_ORDER = ["AR", "US", "FUNDS_EQUITY", "FUNDS_BONDS", "GOLD"]
 
 TARGETS = {
-    "AR": 0.20,
+    "AR": 0.50,
     "US": 0.50,
-    "FUNDS_EQUITY": 0.10,
-    "FUNDS_BONDS": 0.10,
-    "GOLD": 0.10
+    "FUNDS_EQUITY": 0.0,
+    "FUNDS_BONDS": 0.0,
+    "GOLD": 0.0
 }
 
 RISK_FREE_RATE = 0.0          # anual simple
 TRADING_DAYS = 252
-MAX_WEIGHT_PER_ASSET = 0.15
+MAX_WEIGHT_PER_ASSET = 1
 
 
 def build_blocks(tickers, meta):
