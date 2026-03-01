@@ -8,15 +8,15 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 
-from src.markowitz_blocks import max_sharpe_with_blocks, min_variance_with_blocks
-from src.utils_portfolio import rf_log_daily_from_annual_simple, port_stats_log_annual
+from src.markowitz import max_sharpe_with_blocks, min_variance_with_blocks
+from src.markowitz import rf_simple_annual_to_log_daily
+from src.utils_portfolio import port_stats_log, annualize_log
 
 
 BLOCKS_ORDER = ["AR", "US", "FUNDS_EQUITY", "FUNDS_BONDS", "GOLD"]
 TARGETS = {"AR": 0.20, "US": 0.50, "FUNDS_EQUITY": 0.10, "FUNDS_BONDS": 0.10, "GOLD": 0.10}
 
 RISK_FREE_ANNUAL_SIMPLE = 0.0
-PERIODS = 252
 MAX_WEIGHT_BLOCKS = 0.15  # <- tu restricción
 
 
@@ -45,36 +45,52 @@ def main():
     mean_log = returns.mean()
     cov_log = returns.cov()
 
-    rf_log_daily = rf_log_daily_from_annual_simple(RISK_FREE_ANNUAL_SIMPLE, PERIODS)
+    # rf en log diario (consistente con mean_log)
+    rf_log_daily = rf_simple_annual_to_log_daily(RISK_FREE_ANNUAL_SIMPLE)
 
-    # --- leer frontera y nube clásicas ya generadas por run_classic.py
+    # --- leer frontera y nube clásicas ya generadas por run_classic.py (solo plot)
     frontier = pd.read_csv(DATA_DIR / "frontier_classic_annual.csv")
     cloud = pd.read_csv(DATA_DIR / "cloud_classic_annual.csv")
 
     # --- resolver puntos bloqueados
     blocks = build_blocks(mean_log.index, meta)
 
-    res_sh_b = max_sharpe_with_blocks(mean_log, cov_log, blocks, TARGETS, rf_log_daily=rf_log_daily, max_weight=MAX_WEIGHT_BLOCKS)
+    res_sh_b = max_sharpe_with_blocks(
+        mean_log, cov_log, blocks, TARGETS,
+        risk_free_rate=rf_log_daily,
+        max_weight=MAX_WEIGHT_BLOCKS
+    )
     if not res_sh_b.success:
-        raise RuntimeError("Blocks MaxSharpe no convergió: " + res_sh_b.message)
+        raise RuntimeError("Blocks MaxSharpe no convergió: " + str(res_sh_b.message))
     w_sh_b = res_sh_b.x
 
     res_mv_b = min_variance_with_blocks(cov_log, blocks, TARGETS, max_weight=MAX_WEIGHT_BLOCKS)
     if not res_mv_b.success:
-        raise RuntimeError("Blocks MinVar no convergió: " + res_mv_b.message)
+        raise RuntimeError("Blocks MinVar no convergió: " + str(res_mv_b.message))
     w_mv_b = res_mv_b.x
 
-    # stats (annual log)
-    _, _, _, sh_mu_a, sh_vol_a, sh_sh_a, _ = port_stats_log_annual(w_sh_b, mean_log, cov_log, rf_log_daily, PERIODS)
-    _, _, _, mv_mu_a, mv_vol_a, mv_sh_a, _ = port_stats_log_annual(w_mv_b, mean_log, cov_log, rf_log_daily, PERIODS)
+    # stats diarios (log) -> anualizados (log)
+    sh_mu_d, sh_vol_d, sh_sh_d = port_stats_log(w_sh_b, mean_log, cov_log, rf_log_daily)
+    mv_mu_d, mv_vol_d, mv_sh_d = port_stats_log(w_mv_b, mean_log, cov_log, rf_log_daily)
+
+    sh_mu_a, sh_vol_a = annualize_log(sh_mu_d, sh_vol_d)
+    mv_mu_a, mv_vol_a = annualize_log(mv_mu_d, mv_vol_d)
+
+    # Sharpe anual consistente en escala log:
+    # (mu_ann - rf_ann) / vol_ann, con rf_ann = rf_daily*252
+    rf_log_annual = rf_log_daily * 252.0
+    sh_sh_a = (sh_mu_a - rf_log_annual) / sh_vol_a if sh_vol_a > 0 else np.nan
+    mv_sh_a = (mv_mu_a - rf_log_annual) / mv_vol_a if mv_vol_a > 0 else np.nan
 
     # --- plot compare
     plt.figure(figsize=(12, 7))
     plt.scatter(cloud["vol_annual"], cloud["mu_log_annual"], alpha=0.20, label="Classic random portfolios")
     plt.plot(frontier["vol_annual"], frontier["mu_log_annual"], linewidth=3, label="Classic efficient frontier")
 
-    plt.scatter([sh_vol_a], [sh_mu_a], marker="X", s=260, label=f"Blocks MaxSharpe (cap={MAX_WEIGHT_BLOCKS}) sh={sh_sh_a:.3f}")
-    plt.scatter([mv_vol_a], [mv_mu_a], marker="D", s=220, label=f"Blocks MinVar (cap={MAX_WEIGHT_BLOCKS}) sh={mv_sh_a:.3f}")
+    plt.scatter([sh_vol_a], [sh_mu_a], marker="X", s=260,
+                label=f"Blocks MaxSharpe (cap={MAX_WEIGHT_BLOCKS}) sh={sh_sh_a:.3f}")
+    plt.scatter([mv_vol_a], [mv_mu_a], marker="D", s=220,
+                label=f"Blocks MinVar (cap={MAX_WEIGHT_BLOCKS}) sh={mv_sh_a:.3f}")
 
     plt.title("Compare: Classic Frontier + Cloud vs Block-Constrained Portfolios (LOG annualized)")
     plt.xlabel("Volatility (annual)")
@@ -88,8 +104,8 @@ def main():
     print("✔ Saved:", out)
 
     print("\n--- BLOCKS POINTS (annual log) ---")
-    print(f"Blocks MaxSharpe: mu_log={sh_mu_a:.3f} vol={sh_vol_a:.3f} sharpe={sh_sh_a:.3f}")
-    print(f"Blocks MinVar:    mu_log={mv_mu_a:.3f} vol={mv_vol_a:.3f} sharpe={mv_sh_a:.3f}")
+    print(f"Blocks MaxSharpe: mu_log={sh_mu_a:.6f} vol={sh_vol_a:.6f} sharpe={sh_sh_a:.6f}")
+    print(f"Blocks MinVar:    mu_log={mv_mu_a:.6f} vol={mv_vol_a:.6f} sharpe={mv_sh_a:.6f}")
 
 
 if __name__ == "__main__":

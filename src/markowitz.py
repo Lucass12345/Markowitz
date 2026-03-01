@@ -1,5 +1,59 @@
+# src/markowitz.py
+# =========================================================
+# Markowitz core + bloques (convención: mu y Sigma en la MISMA escala)
+# Este repo usa log returns diarios (returns.csv), así que:
+#   mu = E[r_log_daily]
+#   Sigma = Cov[r_log_daily]
+#   risk_free_rate (si se usa) debe ser log daily también.
+# =========================================================
+
+from __future__ import annotations
+
 import numpy as np
 from scipy.optimize import minimize
+
+TRADING_DAYS = 252
+
+
+# =========================================================
+# Utilidades de alineación / validación
+# =========================================================
+def _as_numpy_1d(x):
+    if hasattr(x, "values"):  # pandas Series
+        return np.asarray(x.values, dtype=float)
+    return np.asarray(x, dtype=float).reshape(-1)
+
+
+def _as_numpy_2d(x):
+    if hasattr(x, "values"):  # pandas DataFrame
+        return np.asarray(x.values, dtype=float)
+    return np.asarray(x, dtype=float)
+
+
+def _align_mu_sigma(mean_returns, cov_matrix):
+    """
+    Si vienen pandas, alinea cov_matrix al orden de mean_returns.index.
+    Si vienen numpy, no hace nada.
+    """
+    if hasattr(mean_returns, "index") and hasattr(cov_matrix, "loc"):
+        cov_matrix = cov_matrix.loc[mean_returns.index, mean_returns.index]
+    return mean_returns, cov_matrix
+
+
+def _check_block_targets(block_targets, blocks, tol=1e-9):
+    tot = float(sum(block_targets.values()))
+    if abs(tot - 1.0) > tol:
+        raise ValueError(f"block_targets must sum to 1.0, got {tot}")
+    for bname in block_targets:
+        if bname not in blocks:
+            raise KeyError(f"block '{bname}' not in blocks dict")
+
+
+def rf_simple_annual_to_log_daily(rf_simple_annual: float) -> float:
+    """
+    Convierte rf simple anual -> log daily (consistente con log returns diarios).
+    """
+    return float(np.log1p(rf_simple_annual) / TRADING_DAYS)
 
 
 # =========================================================
@@ -7,54 +61,69 @@ from scipy.optimize import minimize
 # =========================================================
 def portfolio_performance(weights, mean_returns, cov_matrix):
     """
-    Retorno y volatilidad (diarios).
-    mean_returns: pd.Series o np.array (n,)
-    cov_matrix: pd.DataFrame o np.array (n,n)
+    Retorno y volatilidad (diarios) en la escala de mean_returns/Sigma.
+    En tu caso: log daily.
     """
-    portfolio_return = float(np.dot(weights, mean_returns))
-    portfolio_vol = float(np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights))))
-    return portfolio_return, portfolio_vol
+    mean_returns, cov_matrix = _align_mu_sigma(mean_returns, cov_matrix)
+
+    w = _as_numpy_1d(weights)
+    mu = _as_numpy_1d(mean_returns)
+    Sigma = _as_numpy_2d(cov_matrix)
+
+    ret = float(w @ mu)
+    var = float(w.T @ Sigma @ w)
+    vol = float(np.sqrt(max(var, 0.0)))
+    return ret, vol
 
 
 def negative_sharpe(weights, mean_returns, cov_matrix, risk_free_rate=0.0):
     ret, vol = portfolio_performance(weights, mean_returns, cov_matrix)
-    if vol <= 0:
+    if not np.isfinite(vol) or vol <= 1e-18:
         return 1e9
-    return -((ret - risk_free_rate) / vol)
+    return -((ret - float(risk_free_rate)) / vol)
 
 
-def min_variance(mean_returns, cov_matrix):
+def min_variance(mu, Sigma, bounds=None, constraints=()):
     """
-    Min variance long-only (0<=w<=1), sum(w)=1
-    Devuelve weights (np.array)
+    Min var: solve directo. (Matemáticamente equivalente a min vol, pero
+    numéricamente más estable para SLSQP.)
     """
-    n = len(mean_returns)
+    mu, Sigma = _align_mu_sigma(mu, Sigma)
 
-    constraints = ({'type': 'eq', 'fun': lambda w: np.sum(w) - 1.0},)
-    bounds = tuple((0.0, 1.0) for _ in range(n))
-    w0 = np.array([1.0 / n] * n)
+    n = len(mu)
+    Sigma_np = _as_numpy_2d(Sigma)
 
-    # Minimizar volatilidad (equivalente a minimizar varianza)
+    base_constraints = [{'type': 'eq', 'fun': lambda w: np.sum(w) - 1.0}]
+    all_constraints = tuple(base_constraints) + tuple(constraints)
+
+    if bounds is None:
+        bounds = tuple((0.0, 1.0) for _ in range(n))
+
+    w0 = np.ones(n) / n
+
     res = minimize(
-        lambda w: portfolio_performance(w, mean_returns, cov_matrix)[1],
+        lambda w: float(w.T @ Sigma_np @ w),  # varianza
         w0,
-        method='SLSQP',
+        method="SLSQP",
         bounds=bounds,
-        constraints=constraints
+        constraints=all_constraints,
+        options={"maxiter": 5000, "ftol": 1e-12}
     )
+    if not res.success:
+        raise RuntimeError(f"min_variance failed: {res.message}")
     return res.x
 
 
 def max_sharpe(mean_returns, cov_matrix, risk_free_rate=0.0):
     """
-    Max Sharpe long-only (0<=w<=1), sum(w)=1
-    Devuelve weights (np.array)
+    Max Sharpe classic long-only: 0<=w<=1, sum(w)=1
     """
-    n = len(mean_returns)
+    mean_returns, cov_matrix = _align_mu_sigma(mean_returns, cov_matrix)
 
+    n = len(mean_returns)
     constraints = ({'type': 'eq', 'fun': lambda w: np.sum(w) - 1.0},)
     bounds = tuple((0.0, 1.0) for _ in range(n))
-    w0 = np.array([1.0 / n] * n)
+    w0 = np.ones(n) / n
 
     res = minimize(
         negative_sharpe,
@@ -62,8 +131,11 @@ def max_sharpe(mean_returns, cov_matrix, risk_free_rate=0.0):
         args=(mean_returns, cov_matrix, risk_free_rate),
         method='SLSQP',
         bounds=bounds,
-        constraints=constraints
+        constraints=constraints,
+        options={"maxiter": 5000, "ftol": 1e-12}
     )
+    if not res.success:
+        raise RuntimeError(f"max_sharpe failed: {res.message}")
     return res.x
 
 
@@ -73,8 +145,9 @@ def max_sharpe(mean_returns, cov_matrix, risk_free_rate=0.0):
 def _init_w0_from_block_targets(n, blocks, block_targets):
     """
     Inicial uniforme dentro de cada bloque según targets.
+    Asume targets suman 1.
     """
-    w0 = np.zeros(n)
+    w0 = np.zeros(n, dtype=float)
     for bname, idx in blocks.items():
         t = float(block_targets.get(bname, 0.0))
         if len(idx) > 0:
@@ -84,9 +157,9 @@ def _init_w0_from_block_targets(n, blocks, block_targets):
 
 def _block_constraints(blocks, block_targets):
     """
-    Lista de constraints de igualdad:
-    - sum(w)=1
-    - sum(w[idx_block]) = target_block
+    Constraints:
+      - sum(w)=1
+      - sum(w[idx_block]) = target_block (para cada bloque targeteado)
     """
     cons = [{"type": "eq", "fun": lambda w: np.sum(w) - 1.0}]
     for bname, target in block_targets.items():
@@ -98,131 +171,194 @@ def _block_constraints(blocks, block_targets):
     return cons
 
 
-def _cap_and_redistribute_block(weights_block, target_sum, max_weight, tol=1e-12):
+# =========================================================
+# Con bloques: Min Var
+# =========================================================
+def min_variance_with_blocks(cov_matrix, blocks, block_targets, max_weight=1.0):
     """
-    Ajusta un vector de pesos dentro de un bloque para que:
-    - sum = target_sum
-    - 0 <= w_i <= max_weight
-
-    Water-filling con cap.
-    Devuelve np.array o None si es infeasible/numéricamente inestable.
+    Min var long-only con:
+      - sum(w)=1
+      - 0 <= w <= max_weight
+      - sum(w en bloque)=target para cada bloque
+    Devuelve OptimizeResult
     """
-    w = np.array(weights_block, dtype=float)
-    n = len(w)
+    _check_block_targets(block_targets, blocks)
 
-    if n == 0:
-        return np.array([], dtype=float)
+    Sigma = _as_numpy_2d(cov_matrix)
+    n = Sigma.shape[0]
 
-    # si viene todo cero, arranca uniforme
-    if np.all(w <= tol):
-        w = np.ones(n) / n
+    def port_var(w):
+        return float(w.T @ Sigma @ w)
 
-    # normalizar a target_sum
-    s = w.sum()
-    if s <= tol:
-        w = np.ones(n) / n
-        s = 1.0
-    w = w / s * target_sum
+    bounds = tuple((0.0, float(max_weight)) for _ in range(n))
+    w0 = _init_w0_from_block_targets(n, blocks, block_targets)
+    constraints = _block_constraints(blocks, block_targets)
 
-    active = np.ones(n, dtype=bool)
-
-    for _ in range(10 * n):
-        over = (w > max_weight + tol) & active
-        if not np.any(over):
-            break
-
-        w[over] = max_weight
-        active[over] = False
-
-        remaining = target_sum - w[~active].sum()
-        if remaining < -1e-9:
-            return None
-
-        if active.sum() == 0:
-            break
-
-        s_active = w[active].sum()
-        if s_active <= tol:
-            w[active] = remaining / active.sum()
-        else:
-            w[active] = w[active] / s_active * remaining
-
-    # clip final
-    w = np.clip(w, 0.0, max_weight)
-
-    # ajuste final de suma (suave)
-    s = w.sum()
-    if abs(s - target_sum) > 1e-6:
-        free = w < (max_weight - 1e-10)
-        if free.sum() > 0:
-            remaining = target_sum - w[~free].sum()
-            if remaining < -1e-9:
-                return None
-            sf = w[free].sum()
-            if sf <= tol:
-                w[free] = remaining / free.sum()
-            else:
-                w[free] = w[free] / sf * remaining
-        w = np.clip(w, 0.0, max_weight)
-
-    if abs(w.sum() - target_sum) > 1e-4:
-        return None
-    if np.any(w < -1e-9) or np.any(w > max_weight + 1e-9):
-        return None
-
-    return w
-
-
-def _random_feasible_w0(n, blocks, block_targets, max_weight, rng):
-    """
-    Genera un w0 factible:
-    - por cada bloque: Dirichlet -> suma target -> cap por activo con redistribución
-    - suma total 1 (si targets suman 1)
-    """
-    w0 = np.zeros(n, dtype=float)
-
-    for bname, idx in blocks.items():
-        t = float(block_targets.get(bname, 0.0))
-        k = len(idx)
-        if k == 0:
-            continue
-
-        raw = rng.dirichlet(alpha=np.ones(k))
-        wb = _cap_and_redistribute_block(raw, t, max_weight)
-        if wb is None:
-            return None
-        w0[idx] = wb
-
-    if abs(w0.sum() - 1.0) > 1e-6:
-        return None
-    if np.any(w0 < -1e-9) or np.any(w0 > max_weight + 1e-9):
-        return None
-
-    return w0
+    res = minimize(
+        port_var,
+        w0,
+        method="SLSQP",
+        bounds=bounds,
+        constraints=constraints,
+        options={"maxiter": 4000, "ftol": 1e-12}
+    )
+    return res
 
 
 # =========================================================
-# Con bloques: Max Sharpe / Min Var
+# Extremos de retorno (factible) con bloques
 # =========================================================
-def max_sharpe_with_blocks(mean_returns, cov_matrix, blocks, block_targets,
-                           risk_free_rate=0.0, max_weight=1.0,
-                           n_grid=120, tol=1e-6):
+def extreme_return_with_blocks(mean_returns, blocks, block_targets, maximize=True, max_weight=1.0):
     """
-    Max Sharpe *matemáticamente consistente* bajo constraints:
-
-    - Computa w_minvar (factible) => Sharpe_minvar (lower bound).
-    - Construye frontera eficiente con constraints (convexo) usando:
-        min var s.t. mu'w >= target_return
-      para una grilla de retornos entre min/max factible.
-    - Elige el mayor Sharpe encontrado.
-    - Si por aproximación numérica el mejor Sharpe < Sharpe_minvar - tol,
-      devuelve w_minvar (porque el verdadero máximo no puede ser peor que un factible).
-
-    risk_free_rate debe estar en la misma unidad que mean_returns
-    (si mean_returns es log diario, rf log diario).
+    Encuentra retorno mínimo o máximo factible bajo constraints (sin mirar varianza).
+    maximize=True => max mu'w
+    maximize=False => min mu'w
+    Devuelve OptimizeResult
     """
-    mu = mean_returns.values
-    Sigma = cov_matrix.values
+    _check_block_targets(block_targets, blocks)
+
+    mu = _as_numpy_1d(mean_returns)
+    n = len(mu)
+
+    sign = -1.0 if maximize else 1.0
+
+    def obj(w):
+        return float(sign * (w @ mu))
+
+    bounds = tuple((0.0, float(max_weight)) for _ in range(n))
+    w0 = _init_w0_from_block_targets(n, blocks, block_targets)
+    constraints = _block_constraints(blocks, block_targets)
+
+    res = minimize(
+        obj,
+        w0,
+        method="SLSQP",
+        bounds=bounds,
+        constraints=constraints,
+        options={"maxiter": 3000, "ftol": 1e-12}
+    )
+    return res
+
+
+# =========================================================
+# Frontera: Min Var dado retorno mínimo (>=) con bloques
+# =========================================================
+def min_variance_with_blocks_min_return(
+    cov_matrix,
+    mean_returns,
+    blocks,
+    block_targets,
+    target_return,
+    max_weight=1.0
+):
+    """
+    Min var long-only con:
+      - sum(w)=1
+      - 0<=w<=max_weight
+      - sum(w en bloque)=target_bloque
+      - mu'w >= target_return   (INEQ, más estable que igualdad)
+    Devuelve OptimizeResult
+    """
+    _check_block_targets(block_targets, blocks)
+
+    mu = _as_numpy_1d(mean_returns)
+    Sigma = _as_numpy_2d(cov_matrix)
+    n = len(mu)
+
+    def portfolio_var(w):
+        return float(w.T @ Sigma @ w)
+
+    w0 = _init_w0_from_block_targets(n, blocks, block_targets)
+    bounds = tuple((0.0, float(max_weight)) for _ in range(n))
+
+    constraints = _block_constraints(blocks, block_targets)
+    constraints.append({
+        "type": "ineq",
+        "fun": lambda w, tr=float(target_return): float(w @ mu) - tr
+    })
+
+    res = minimize(
+        portfolio_var,
+        w0,
+        method="SLSQP",
+        bounds=bounds,
+        constraints=constraints,
+        options={"maxiter": 4000, "ftol": 1e-12}
+    )
+    return res
+
+
+def min_variance_with_blocks_return_target(
+    cov_matrix,
+    mean_returns,
+    blocks,
+    block_targets,
+    target_return,
+    max_weight=1.0
+):
+    """
+    Versión con igualdad mu'w = target_return (menos estable).
+    Devuelve OptimizeResult
+    """
+    _check_block_targets(block_targets, blocks)
+
+    mu = _as_numpy_1d(mean_returns)
+    Sigma = _as_numpy_2d(cov_matrix)
+    n = len(mu)
+
+    def portfolio_var(w):
+        return float(w.T @ Sigma @ w)
+
+    w0 = _init_w0_from_block_targets(n, blocks, block_targets)
+    bounds = tuple((0.0, float(max_weight)) for _ in range(n))
+
+    constraints = _block_constraints(blocks, block_targets)
+    constraints.append({
+        "type": "eq",
+        "fun": lambda w, tr=float(target_return): float(w @ mu) - tr
+    })
+
+    res = minimize(
+        portfolio_var,
+        w0,
+        method="SLSQP",
+        bounds=bounds,
+        constraints=constraints,
+        options={"maxiter": 4000, "ftol": 1e-12}
+    )
+    return res
+
+
+# =========================================================
+# Con bloques: Max Sharpe (robusto)
+# =========================================================
+def max_sharpe_with_blocks(
+    mean_returns,
+    cov_matrix,
+    blocks,
+    block_targets,
+    risk_free_rate=0.0,
+    max_weight=1.0,
+    n_grid=120,
+    tol=1e-6
+):
+    """
+    Max Sharpe bajo constraints de bloques, de forma robusta:
+
+    1) Resuelve MinVar (factible) como lower bound.
+    2) Resuelve extremos de retorno factible (min/max).
+    3) Recorre una grilla de retornos y resuelve: MinVar s.t. mu'w >= tr
+       (convexo, estable). Calcula Sharpe y elige el mejor.
+    4) Si la búsqueda numérica no supera a MinVar por tol, devuelve MinVar.
+
+    Nota: risk_free_rate debe estar en la misma escala que mean_returns
+    (log daily si mean_returns es log daily).
+    """
+    mean_returns, cov_matrix = _align_mu_sigma(mean_returns, cov_matrix)
+    _check_block_targets(block_targets, blocks)
+
+    mu = _as_numpy_1d(mean_returns)
+    Sigma = _as_numpy_2d(cov_matrix)
 
     def sharpe_of(w):
         w = np.asarray(w, dtype=float)
@@ -231,7 +367,7 @@ def max_sharpe_with_blocks(mean_returns, cov_matrix, blocks, block_targets,
             return -np.inf
         vol = float(np.sqrt(var))
         ret = float(w @ mu)
-        return (ret - float(risk_free_rate)) / vol  # Sharpe diario (consistente)
+        return (ret - float(risk_free_rate)) / vol  # Sharpe diario consistente
 
     # 0) Lower bound: MinVar
     res_mv = min_variance_with_blocks(cov_matrix, blocks, block_targets, max_weight=max_weight)
@@ -251,10 +387,10 @@ def max_sharpe_with_blocks(mean_returns, cov_matrix, blocks, block_targets,
         res_mv.message = f"Fallback to MinVar. Sharpe(minvar)={sh_minvar:.6f}"
         return res_mv
 
-    r_min = float(mu @ res_min_ret.x)
-    r_max = float(mu @ res_max_ret.x)
+    r_min = float(mu @ np.asarray(res_min_ret.x, dtype=float))
+    r_max = float(mu @ np.asarray(res_max_ret.x, dtype=float))
 
-    if (r_max - r_min) < 1e-10:
+    if (r_max - r_min) < 1e-12:
         res_mv.message = f"Degenerate return range. Using MinVar. Sharpe(minvar)={sh_minvar:.6f}"
         return res_mv
 
@@ -275,7 +411,7 @@ def max_sharpe_with_blocks(mean_returns, cov_matrix, blocks, block_targets,
             mean_returns=mean_returns,
             blocks=blocks,
             block_targets=block_targets,
-            target_return=float(tr),     # ✅ nombre correcto
+            target_return=float(tr),
             max_weight=max_weight
         )
         if not res.success:
@@ -302,13 +438,23 @@ def max_sharpe_with_blocks(mean_returns, cov_matrix, blocks, block_targets,
     return best_res
 
 
-def _max_sharpe_with_blocks_direct(mean_returns, cov_matrix, blocks, block_targets,
-                                   risk_free_rate=0.0, max_weight=1.0):
+def max_sharpe_with_blocks_direct(
+    mean_returns,
+    cov_matrix,
+    blocks,
+    block_targets,
+    risk_free_rate=0.0,
+    max_weight=1.0
+):
     """
-    Fallback: versión directa (no convexa) por si la grilla falla.
+    Opción directa (no convexa) por si querés probar/diagnosticar.
+    Normalmente la versión por frontera (convexa) es más estable.
     """
-    mu = mean_returns.values
-    Sigma = cov_matrix.values
+    mean_returns, cov_matrix = _align_mu_sigma(mean_returns, cov_matrix)
+    _check_block_targets(block_targets, blocks)
+
+    mu = _as_numpy_1d(mean_returns)
+    Sigma = _as_numpy_2d(cov_matrix)
     n = len(mu)
 
     def obj(w):
@@ -323,143 +469,8 @@ def _max_sharpe_with_blocks_direct(mean_returns, cov_matrix, blocks, block_targe
     w0 = _init_w0_from_block_targets(n, blocks, block_targets)
     constraints = _block_constraints(blocks, block_targets)
 
-    return minimize(
-        obj,
-        w0,
-        method="SLSQP",
-        bounds=bounds,
-        constraints=constraints,
-        options={"maxiter": 4000, "ftol": 1e-12}
-    )
-
-
-def min_variance_with_blocks(cov_matrix, blocks, block_targets, max_weight=1.0):
-    """
-    Min var long-only con:
-      - sum(w)=1
-      - 0 <= w <= max_weight
-      - sum(w en bloque)=target para cada bloque
-    Devuelve res (OptimizeResult)
-    """
-    Sigma = cov_matrix.values
-    n = Sigma.shape[0]
-
-    def port_var(w):
-        return float(np.dot(w.T, np.dot(Sigma, w)))
-
-    bounds = tuple((0.0, float(max_weight)) for _ in range(n))
-    w0 = _init_w0_from_block_targets(n, blocks, block_targets)
-    constraints = _block_constraints(blocks, block_targets)
-
-    res = minimize(
-        port_var,
-        w0,
-        method="SLSQP",
-        bounds=bounds,
-        constraints=constraints,
-        options={"maxiter": 3000, "ftol": 1e-12}
-    )
-    return res
-
-
-# =========================================================
-# Frontera exacta: Min Var dado retorno objetivo (con bloques)
-# =========================================================
-def min_variance_with_blocks_return_target(cov_matrix, mean_returns, blocks, block_targets,
-                                           target_return, max_weight=1.0):
-    """
-    Min var long-only con:
-      - sum(w)=1
-      - 0 <= w <= max_weight
-      - sum(w en bloque)=target_bloque
-      - mu'w = target_return
-    Devuelve res (OptimizeResult)
-    """
-    mu = mean_returns.values
-    Sigma = cov_matrix.values
-    n = len(mu)
-
-    def port_var(w):
-        return float(np.dot(w.T, np.dot(Sigma, w)))
-
-    bounds = tuple((0.0, float(max_weight)) for _ in range(n))
-    w0 = _init_w0_from_block_targets(n, blocks, block_targets)
-
-    constraints = _block_constraints(blocks, block_targets)
-    constraints.append({
-        "type": "eq",
-        "fun": lambda w, tr=float(target_return): float(np.dot(w, mu)) - tr
-    })
-
-    res = minimize(
-        port_var,
-        w0,
-        method="SLSQP",
-        bounds=bounds,
-        constraints=constraints,
-        options={"maxiter": 4000, "ftol": 1e-12}
-    )
-    return res
-
-
-def extreme_return_with_blocks(mean_returns, blocks, block_targets, maximize=True, max_weight=1.0):
-    """
-    Encuentra retorno mínimo o máximo factible bajo constraints (sin mirar varianza).
-    maximize=True => max mu'w
-    maximize=False => min mu'w
-    Devuelve res (OptimizeResult)
-    """
-    mu = mean_returns.values
-    n = len(mu)
-
-    sign = -1.0 if maximize else 1.0
-
-    def obj(w):
-        return float(sign * np.dot(w, mu))
-
-    bounds = tuple((0.0, float(max_weight)) for _ in range(n))
-    w0 = _init_w0_from_block_targets(n, blocks, block_targets)
-    constraints = _block_constraints(blocks, block_targets)
-
     res = minimize(
         obj,
-        w0,
-        method="SLSQP",
-        bounds=bounds,
-        constraints=constraints,
-        options={"maxiter": 3000, "ftol": 1e-12}
-    )
-    return res
-
-
-def min_variance_with_blocks_min_return(cov_matrix, mean_returns, blocks, block_targets,
-                                        target_return, max_weight=1.0):
-    """
-    Min var long-only con:
-      - sum(w)=1
-      - 0<=w<=max_weight
-      - sum(w en bloque)=target_bloque
-      - mu'w >= target_return   (INEQ, más estable que igualdad)
-    Devuelve res (OptimizeResult)
-    """
-    mu = mean_returns.values
-    Sigma = cov_matrix.values
-    n = len(mu)
-
-    def portfolio_var(w):
-        return float(np.dot(w.T, np.dot(Sigma, w)))
-
-    w0 = _init_w0_from_block_targets(n, blocks, block_targets)
-    bounds = tuple((0.0, float(max_weight)) for _ in range(n))
-
-    constraints = _block_constraints(blocks, block_targets)
-    constraints.append({
-        "type": "ineq",
-        "fun": lambda w, tr=float(target_return): float(np.dot(w, mu)) - tr
-    })
-
-    res = minimize(
-        portfolio_var,
         w0,
         method="SLSQP",
         bounds=bounds,
