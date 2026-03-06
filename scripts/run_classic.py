@@ -12,8 +12,6 @@ from src.config import DEFAULT_CONFIG, TRADING_DAYS
 from src.markowitz_classic import min_variance, max_sharpe
 from src.utils_portfolio import port_stats_log, annualize_log, log_to_simple_annual
 
-
-ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = ROOT / "Data"
 
 CFG = DEFAULT_CONFIG
@@ -57,8 +55,11 @@ returns = returns.dropna(how="any")
 mu_log_daily = returns.mean().values
 Sigma_log_daily = returns.cov().values
 
+# risk-free en log diario (coherente con log returns)
+rf_log_daily = rf_annual_simple_to_log_daily(RF_ANNUAL_SIMPLE, PERIODS)
+
 # =========================
-# Min Variance
+# Min Variance (classic)
 # =========================
 w_minvar = min_variance(mu_log_daily, Sigma_log_daily)
 rep_min = portfolio_report_log(w_minvar, mu_log_daily, Sigma_log_daily, RF_ANNUAL_SIMPLE, PERIODS)
@@ -68,9 +69,8 @@ for k, v in rep_min.items():
     print(f"{k:>24}: {v}")
 
 # =========================
-# Max Sharpe
+# Max Sharpe (classic)
 # =========================
-rf_log_daily = rf_annual_simple_to_log_daily(RF_ANNUAL_SIMPLE, PERIODS)
 w_sharpe = max_sharpe(mu_log_daily, Sigma_log_daily, risk_free_rate=rf_log_daily)
 rep_sh = portfolio_report_log(w_sharpe, mu_log_daily, Sigma_log_daily, RF_ANNUAL_SIMPLE, PERIODS)
 
@@ -79,42 +79,82 @@ for k, v in rep_sh.items():
     print(f"{k:>24}: {v}")
 
 # =========================
-# Generate classic frontier + cloud (annual log)
+# Save classic key points (for plotting on frontier)
+# =========================
+classic_points = pd.DataFrame([
+    {
+        "name": "Classic MinVar",
+        "mu_log_annual": rep_min["mu_log_annual"],
+        "vol_annual": rep_min["vol_annual"],
+        "sharpe_annual": rep_min["sharpe_annual"],
+    },
+    {
+        "name": "Classic MaxSharpe",
+        "mu_log_annual": rep_sh["mu_log_annual"],
+        "vol_annual": rep_sh["vol_annual"],
+        "sharpe_annual": rep_sh["sharpe_annual"],
+    },
+])
+
+classic_points_path = DATA_DIR / "classic_points_annual.csv"
+classic_points.to_csv(classic_points_path, index=False)
+print("✔ Saved:", classic_points_path)
+
+# =========================
+# Generate classic cloud + frontier (annual log)
 # =========================
 np.random.seed(42)
 
-N_PORTFOLIOS = 8000   # nube
-N_FRONTIER = 60       # puntos de frontera
+N_PORTFOLIOS = 8000  # nube
+N_FRONTIER = 80      # puntos de frontera (más denso para curva más suave)
 
-# Random portfolios (cloud)
+# ----- Cloud: random portfolios (long-only)
 weights = np.random.dirichlet(np.ones(returns.shape[1]), size=N_PORTFOLIOS)
 
 cloud_rows = []
 for w in weights:
-    mu_d, vol_d, sh_d = port_stats_log(w, mu_log_daily, Sigma_log_daily, rf_log_daily=rf_log_daily)
+    mu_d, vol_d, _ = port_stats_log(w, mu_log_daily, Sigma_log_daily, rf_log_daily=rf_log_daily)
     mu_a, vol_a = annualize_log(mu_d, vol_d, periods=PERIODS)
     cloud_rows.append({"mu_log_annual": mu_a, "vol_annual": vol_a})
 
 cloud_df = pd.DataFrame(cloud_rows)
 
-# Efficient frontier approximation:
-# sweep target returns between min and max feasible return for long-only
+# ----- Frontier: robust construction
 mu_vec = mu_log_daily
-r_min = float(mu_vec.min())
-r_max = float(mu_vec.max())
-targets = np.linspace(r_min, r_max, N_FRONTIER)
+Sigma = Sigma_log_daily
+n = len(mu_vec)
+
+bounds = tuple((0.0, 1.0) for _ in range(n))
+w0 = np.ones(n) / n
+cons_sum = ({"type": "eq", "fun": lambda w: np.sum(w) - 1.0},)
+
+# Feasible return range (long-only): min/max of mu'w under sum(w)=1, w>=0
+def obj_min_ret(w):
+    return float(w @ mu_vec)
+
+def obj_max_ret(w):
+    return float(-(w @ mu_vec))
+
+res_rmin = minimize(obj_min_ret, w0, method="SLSQP", bounds=bounds, constraints=cons_sum,
+                    options={"maxiter": 4000, "ftol": 1e-12})
+res_rmax = minimize(obj_max_ret, w0, method="SLSQP", bounds=bounds, constraints=cons_sum,
+                    options={"maxiter": 4000, "ftol": 1e-12})
+
+r_min = float(res_rmin.x @ mu_vec)
+r_max = float(res_rmax.x @ mu_vec)
+
+# Grid dentro del rango factible (evita extremos)
+targets = np.linspace(r_min + 0.01 * (r_max - r_min), r_max - 0.01 * (r_max - r_min), N_FRONTIER)
 
 frontier_rows = []
 for tr in targets:
-    # min variance with additional constraint mu'w = tr
-    cons = (
+    cons = [
         {"type": "eq", "fun": lambda w: np.sum(w) - 1.0},
-        {"type": "eq", "fun": lambda w, tr=tr: float(np.dot(w, mu_vec)) - float(tr)},
-    )
-    bnds = tuple((0.0, 1.0) for _ in range(len(mu_vec)))
-    w0 = np.ones(len(mu_vec)) / len(mu_vec)
+        {"type": "ineq", "fun": lambda w, tr=tr: float(w @ mu_vec) - float(tr)},  # mu'w >= tr
+    ]
 
-    res = minimize(lambda w: float(w.T @ Sigma_log_daily @ w), w0, method="SLSQP", bounds=bnds, constraints=cons,
+    res = minimize(lambda w: float(w.T @ Sigma @ w), w0, method="SLSQP",
+                   bounds=bounds, constraints=cons,
                    options={"maxiter": 4000, "ftol": 1e-12})
     if not res.success:
         continue
@@ -122,11 +162,18 @@ for tr in targets:
     w = res.x
     mu_d, vol_d, _ = port_stats_log(w, mu_log_daily, Sigma_log_daily, rf_log_daily=rf_log_daily)
     mu_a, vol_a = annualize_log(mu_d, vol_d, periods=PERIODS)
-    frontier_rows.append({"mu_log_annual": mu_a, "vol_annual": vol_a})
 
-frontier_df = pd.DataFrame(frontier_rows).sort_values("vol_annual")
+    if np.isfinite(mu_a) and np.isfinite(vol_a) and vol_a > 0:
+        frontier_rows.append({"mu_log_annual": mu_a, "vol_annual": vol_a})
 
-# Save
+frontier_df = pd.DataFrame(frontier_rows)
+
+# Ordenar por vol y quitar duplicados de vol (suaviza la línea)
+frontier_df = frontier_df.sort_values("vol_annual").drop_duplicates("vol_annual").reset_index(drop=True)
+
+# =========================
+# Save outputs used by run_compare.py
+# =========================
 cloud_path = DATA_DIR / "cloud_classic_annual.csv"
 frontier_path = DATA_DIR / "frontier_classic_annual.csv"
 

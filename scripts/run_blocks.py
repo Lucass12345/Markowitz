@@ -7,7 +7,8 @@ sys.path.append(str(ROOT))
 import numpy as np
 import pandas as pd
 
-from src.markowitz import max_sharpe_with_blocks, min_variance_with_blocks
+from src.markowitz import max_sharpe_with_blocks
+# from src.markowitz import min_variance_with_blocks  # <- (comentado) NO usamos MinVar
 
 from src.config import DEFAULT_CONFIG, TRADING_DAYS
 CFG = DEFAULT_CONFIG
@@ -15,8 +16,8 @@ CFG = DEFAULT_CONFIG
 BLOCKS_ORDER = CFG.blocks_order
 TARGETS = CFG.targets
 
-RISK_FREE_RATE = CFG.risk_free_annual_simple      # ← ESTE es el punto
-MAX_WEIGHT_PER_ASSET = CFG.max_weight_blocks      # o CFG.max_weight_per_asset según tu config
+RISK_FREE_RATE = CFG.risk_free_annual_simple
+MAX_WEIGHT_PER_ASSET = CFG.max_weight_blocks
 
 
 def build_blocks(tickers, meta, targets):
@@ -133,7 +134,7 @@ def main():
     print("Max weight per asset:", MAX_WEIGHT_PER_ASSET)
 
     # ==============================
-    # MAX SHARPE
+    # MAX SHARPE (BLOCKS)
     # ==============================
     print("\n==============================")
     print("MAX SHARPE WITH BLOCK TARGETS")
@@ -147,36 +148,38 @@ def main():
 
     if not res_sh.success:
         print("❌ Max Sharpe no convergió:", res_sh.message)
-    else:
-        # ✅ crudo/alineado (para cálculos)
-        w_sh_raw = pd.Series(res_sh.x, index=mean_returns.index)
-        # ✅ ordenado (para output)
-        w_sh = w_sh_raw.sort_values(ascending=False)
+        return
 
-        print("✔ Converged:", res_sh.success)
-        print("Message:", res_sh.message)
-        print("Sum weights:", float(w_sh_raw.sum()))
-        print_exposures(w_sh_raw, meta2, TARGETS)
+    # ✅ crudo/alineado (para cálculos)
+    w_sh_raw = pd.Series(res_sh.x, index=mean_returns.index)
+    # ✅ ordenado (para output)
+    w_sh = w_sh_raw.sort_values(ascending=False)
 
-        save_detailed_weights(data_dir, "weights_maxsharpe_blocks_detailed.csv", w_sh, meta2)
+    print("✔ Converged:", res_sh.success)
+    print("Message:", res_sh.message)
+    print("Sum weights:", float(w_sh_raw.sum()))
+    print_exposures(w_sh_raw, meta2, TARGETS)
 
-        print("\nTop 10 weights (Max Sharpe):")
-        print(w_sh.head(10))
+    save_detailed_weights(data_dir, "weights_maxsharpe_blocks_detailed.csv", w_sh, meta2)
 
-        print_block_stats(w_sh_raw, meta2)
+    print("\nTop 10 weights (Max Sharpe):")
+    print(w_sh.head(10))
 
-        mu_d, v_d, s_d, mu_a, v_a, s_a, r_a_simple = port_stats_log(
-            w_sh_raw.values, mean_returns, cov_matrix,
-            rf_log_daily=rf_log_daily,
-            periods=TRADING_DAYS
-        )
-        print(f"\nMaxSharpe stats (LOG input, aligned):")
-        print(f"Daily:  mu_log={mu_d:.6f} vol={v_d:.6f} sharpe={s_d:.6f}")
-        print(f"Annual: mu_log={mu_a:.3f} vol={v_a:.3f} sharpe={s_a:.3f} | simple_equiv_ret={r_a_simple:.3f}")
+    print_block_stats(w_sh_raw, meta2)
+
+    mu_d, v_d, s_d, mu_a, v_a, s_a, r_a_simple = port_stats_log(
+        w_sh_raw.values, mean_returns, cov_matrix,
+        rf_log_daily=rf_log_daily,
+        periods=TRADING_DAYS
+    )
+    print(f"\nMaxSharpe stats (LOG input, aligned):")
+    print(f"Daily:  mu_log={mu_d:.6f} vol={v_d:.6f} sharpe={s_d:.6f}")
+    print(f"Annual: mu_log={mu_a:.3f} vol={v_a:.3f} sharpe={s_a:.3f} | simple_equiv_ret={r_a_simple:.3f}")
 
     # ==============================
-    # MIN VAR
+    # MIN VAR (BLOCKS)  <-- COMENTADO
     # ==============================
+    """
     print("\n==============================")
     print("MIN VAR WITH BLOCK TARGETS")
     print("==============================")
@@ -212,6 +215,7 @@ def main():
         print(f"\nMinVar stats (LOG input, aligned):")
         print(f"Daily:  mu_log={mu_d:.6f} vol={v_d:.6f} sharpe={s_d:.6f}")
         print(f"Annual: mu_log={mu_a:.3f} vol={v_a:.3f} sharpe={s_a:.3f} | simple_equiv_ret={r_a_simple:.3f}")
+    """
 
 
 if __name__ == "__main__":
