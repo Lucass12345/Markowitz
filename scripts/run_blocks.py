@@ -9,28 +9,23 @@ import pandas as pd
 
 from src.markowitz import max_sharpe_with_blocks, min_variance_with_blocks
 
-BLOCKS_ORDER = ["AR", "US", "FUNDS_EQUITY", "FUNDS_BONDS", "GOLD"]
+from src.config import DEFAULT_CONFIG, TRADING_DAYS
+CFG = DEFAULT_CONFIG
 
-TARGETS = {
-    "AR": 0.50,
-    "US": 0.50,
-    "FUNDS_EQUITY": 0.0,
-    "FUNDS_BONDS": 0.0,
-    "GOLD": 0.0
-}
+BLOCKS_ORDER = CFG.blocks_order
+TARGETS = CFG.targets
 
-RISK_FREE_RATE = 0.0          # anual simple
-TRADING_DAYS = 252
-MAX_WEIGHT_PER_ASSET = 1
+RISK_FREE_RATE = CFG.risk_free_annual_simple      # ← ESTE es el punto
+MAX_WEIGHT_PER_ASSET = CFG.max_weight_blocks      # o CFG.max_weight_per_asset según tu config
 
 
-def build_blocks(tickers, meta):
+def build_blocks(tickers, meta, targets):
     meta2 = meta.set_index("ticker").loc[tickers]
     blocks = {}
-    for b in BLOCKS_ORDER:
+    for b in targets.keys():
         idx = list(np.where(meta2["block"].values == b)[0])
-        if len(idx) == 0:
-            raise ValueError(f"Bloque {b} quedó vacío. Revisá assets_metadata.csv")
+        if float(targets[b]) > 0.0 and len(idx) == 0:
+            raise ValueError(f"Bloque {b} quedó vacío pero target>0. Revisá assets_metadata.csv")
         blocks[b] = idx
     return blocks
 
@@ -123,7 +118,7 @@ def main():
     mean_returns = returns.mean()   # LOG diarios
     cov_matrix = returns.cov()      # cov de LOG diarios
 
-    blocks = build_blocks(mean_returns.index, meta)
+    blocks = build_blocks(mean_returns.index, meta, TARGETS)
     meta2 = meta.set_index("ticker").loc[mean_returns.index]
 
     rf_log_daily = rf_annual_simple_to_log_daily(RISK_FREE_RATE, periods=TRADING_DAYS)

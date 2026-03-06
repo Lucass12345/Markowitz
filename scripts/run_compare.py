@@ -13,20 +13,23 @@ from src.markowitz import rf_simple_annual_to_log_daily
 from src.utils_portfolio import port_stats_log, annualize_log
 
 
-BLOCKS_ORDER = ["AR", "US", "FUNDS_EQUITY", "FUNDS_BONDS", "GOLD"]
-TARGETS = {"AR": 0.20, "US": 0.50, "FUNDS_EQUITY": 0.10, "FUNDS_BONDS": 0.10, "GOLD": 0.10}
+from src.config import DEFAULT_CONFIG, TRADING_DAYS
+CFG = DEFAULT_CONFIG
 
-RISK_FREE_ANNUAL_SIMPLE = 0.0
-MAX_WEIGHT_BLOCKS = 0.15  # <- tu restricción
+BLOCKS_ORDER = CFG.blocks_order
+TARGETS = CFG.targets
+RISK_FREE_ANNUAL_SIMPLE = CFG.risk_free_annual_simple
+MAX_WEIGHT_BLOCKS = CFG.max_weight_blocks
 
 
-def build_blocks(tickers, meta):
+def build_blocks(tickers, meta, targets):
     meta2 = meta.set_index("ticker").loc[tickers]
     blocks = {}
-    for b in BLOCKS_ORDER:
+    for b in targets.keys():  # usa los targets como "verdad"
         idx = list(np.where(meta2["block"].values == b)[0])
-        if len(idx) == 0:
-            raise ValueError(f"Bloque {b} quedó vacío. Revisá assets_metadata.csv")
+        # Solo es error si target > 0 y el bloque está vacío
+        if float(targets[b]) > 0.0 and len(idx) == 0:
+            raise ValueError(f"Bloque {b} quedó vacío pero target>0. Revisá assets_metadata.csv")
         blocks[b] = idx
     return blocks
 
@@ -53,7 +56,7 @@ def main():
     cloud = pd.read_csv(DATA_DIR / "cloud_classic_annual.csv")
 
     # --- resolver puntos bloqueados
-    blocks = build_blocks(mean_log.index, meta)
+    blocks = build_blocks(mean_log.index, meta, TARGETS)
 
     res_sh_b = max_sharpe_with_blocks(
         mean_log, cov_log, blocks, TARGETS,
