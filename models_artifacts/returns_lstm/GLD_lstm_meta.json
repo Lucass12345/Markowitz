@@ -1,0 +1,18 @@
+{
+  "ticker": "GLD",
+  "seq_len": 20,
+  "forecast_horizon": 5,
+  "hidden_size": 64,
+  "num_layers": 2,
+  "dropout": 0.2,
+  "metrics": {
+    "mse_test": 0.0006344154244288802,
+    "rmse_test": 0.025187604129314423,
+    "mae_test": 0.01935449056327343,
+    "best_val_loss": 0.00035954423947259784,
+    "train_size": 1425,
+    "val_size": 306,
+    "test_size": 306,
+    "epochs_trained": 16
+  }
+}

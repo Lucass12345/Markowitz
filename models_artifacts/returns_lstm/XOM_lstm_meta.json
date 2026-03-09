@@ -1,0 +1,18 @@
+{
+  "ticker": "XOM",
+  "seq_len": 20,
+  "forecast_horizon": 5,
+  "hidden_size": 64,
+  "num_layers": 2,
+  "dropout": 0.2,
+  "metrics": {
+    "mse_test": 0.001069210353307426,
+    "rmse_test": 0.03269878029823303,
+    "mae_test": 0.024991484358906746,
+    "best_val_loss": 0.0008060176041908562,
+    "train_size": 1425,
+    "val_size": 306,
+    "test_size": 306,
+    "epochs_trained": 13
+  }
+}

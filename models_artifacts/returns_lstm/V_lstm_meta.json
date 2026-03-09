@@ -1,0 +1,18 @@
+{
+  "ticker": "V",
+  "seq_len": 20,
+  "forecast_horizon": 5,
+  "hidden_size": 64,
+  "num_layers": 2,
+  "dropout": 0.2,
+  "metrics": {
+    "mse_test": 0.0008230825769715011,
+    "rmse_test": 0.028689416125416756,
+    "mae_test": 0.022007202729582787,
+    "best_val_loss": 0.00046356982784345746,
+    "train_size": 1425,
+    "val_size": 306,
+    "test_size": 306,
+    "epochs_trained": 22
+  }
+}
