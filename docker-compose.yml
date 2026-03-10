@@ -1,0 +1,67 @@
+﻿version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: markowitz_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-markowitz}
+      POSTGRES_USER: ${POSTGRES_USER:-markowitz_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-markowitz_pass}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  adminer:
+    image: adminer:latest
+    container_name: markowitz_adminer
+    restart: unless-stopped
+    depends_on:
+      - postgres
+    ports:
+      - "8080:8080"
+
+  mlflow:
+    image: python:3.11-slim
+    container_name: markowitz_mlflow
+    restart: unless-stopped
+    working_dir: /mlflow
+    command: >
+      bash -c "pip install mlflow==2.21.0 &&
+      mkdir -p /mlflow/artifacts &&
+      mlflow server
+      --host 0.0.0.0
+      --port 5000
+      --backend-store-uri sqlite:///mlflow.db
+      --artifacts-destination /mlflow/artifacts"
+    ports:
+      - "5000:5000"
+    volumes:
+      - mlflow_data:/mlflow
+
+  streamlit:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: markowitz_streamlit
+    restart: unless-stopped
+    depends_on:
+      - postgres
+      - mlflow
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg2://markowitz_user:markowitz_pass@postgres:5432/markowitz}
+      MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI:-http://mlflow:5000}
+      MLFLOW_EXPERIMENT_NAME: ${MLFLOW_EXPERIMENT_NAME:-markowitz-streamlit}
+      STREAMLIT_SERVER_HEADLESS: "true"
+    ports:
+      - "8501:8501"
+    volumes:
+      - .:/apprepo
+
+volumes:
+  postgres_data:
+  mlflow_data:
