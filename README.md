@@ -156,3 +156,23 @@ optimización de portafolios (Markowitz)
 forecasting de retornos y volatilidad
 
 modelos de machine learning aplicados a finanzas
+
+streamlit run: 
+cd /d C:\Users\lucas\OneDrive\Documentos\GitHub\Markowitz
+C:\Users\lucas\anaconda3\envs\IIA_cuda_env\python.exe -m streamlit run app/streamlit_app.py --server.port 8502
+
+http://127.0.0.1:8502
+
+FAstapi: 
+cd /d C:\Users\lucas\OneDrive\Documentos\GitHub\Markowitz
+set "MLFLOW_TRACKING_URI=file:///C:/Users/lucas/OneDrive/Documentos/GitHub/Markowitz/mlruns"
+set "MLFLOW_EXPERIMENT_NAME=markowitz-streamlit"
+C:\Users\lucas\anaconda3\envs\IIA_cuda_env\python.exe -m uvicorn api.main:app --reload
+
+Link: http://127.0.0.1:8000/docs
+
+mlflow:
+cd /d C:\Users\lucas\OneDrive\Documentos\GitHub\Markowitz
+C:\Users\lucas\anaconda3\envs\IIA_cuda_env\python.exe -m mlflow ui --backend-store-uri "file:///C:/Users/lucas/OneDrive/Documentos/GitHub/Markowitz/mlruns" --port 5005
+
+http://127.0.0.1:5005

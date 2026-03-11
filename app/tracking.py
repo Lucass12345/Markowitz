@@ -9,10 +9,14 @@ import pandas as pd
 
 def track_run_mlflow(run_db_id: int, run_label: str | None, config: dict, result: dict) -> tuple[str | None, str | None]:
     """
+    Track one optimization run in MLflow.
+
     Returns:
         (mlflow_run_id, error_message)
     """
     tracking_uri = os.getenv("MLFLOW_TRACKING_URI")
+    experiment_name = os.getenv("MLFLOW_EXPERIMENT_NAME", "markowitz-streamlit")
+
     if not tracking_uri:
         return None, "MLFLOW_TRACKING_URI not configured"
 
@@ -23,19 +27,22 @@ def track_run_mlflow(run_db_id: int, run_label: str | None, config: dict, result
 
     try:
         mlflow.set_tracking_uri(tracking_uri)
-        mlflow.set_experiment(os.getenv("MLFLOW_EXPERIMENT_NAME", "markowitz-streamlit"))
+        mlflow.set_experiment(experiment_name)
 
         run_name = run_label or f"{config['mode']}-run-{run_db_id}"
 
         with mlflow.start_run(run_name=run_name) as run:
             mlflow.set_tags(
                 {
-                    "source": "streamlit",
+                    "source": "fastapi",
                     "db_run_id": str(run_db_id),
                     "model_type": str(config["mode"]),
                 }
             )
 
+            # -------------------------
+            # Params
+            # -------------------------
             mlflow.log_params(
                 {
                     "model_type": str(config["mode"]),
@@ -48,6 +55,9 @@ def track_run_mlflow(run_db_id: int, run_label: str | None, config: dict, result
             for block, target in config["targets"].items():
                 mlflow.log_param(f"target_{block}", float(target))
 
+            # -------------------------
+            # Metrics
+            # -------------------------
             block_stats = result["blocks"]["stats"]
             minvar_stats = result["minvar"]["stats"]
             maxsharpe_stats = result["maxsharpe"]["stats"]
@@ -66,6 +76,9 @@ def track_run_mlflow(run_db_id: int, run_label: str | None, config: dict, result
                 }
             )
 
+            # -------------------------
+            # Artifacts
+            # -------------------------
             with tempfile.TemporaryDirectory() as tmpdir:
                 tmp_path = Path(tmpdir)
 
@@ -74,9 +87,9 @@ def track_run_mlflow(run_db_id: int, run_label: str | None, config: dict, result
                 exposure_path = tmp_path / "block_exposure.csv"
                 comparison_path = tmp_path / "comparison.csv"
 
-                result["frontier"].to_csv(frontier_path, index=False)
-                result["blocks"]["weights_df"].to_csv(weights_path, index=False)
-                result["blocks"]["exposure_by_block"].to_csv(exposure_path, index=False)
+                pd.DataFrame(result["frontier"]).to_csv(frontier_path, index=False)
+                pd.DataFrame(result["blocks"]["weights_df"]).to_csv(weights_path, index=False)
+                pd.DataFrame(result["blocks"]["exposure_by_block"]).to_csv(exposure_path, index=False)
 
                 comparison_df = pd.DataFrame(
                     [
@@ -104,4 +117,4 @@ def track_run_mlflow(run_db_id: int, run_label: str | None, config: dict, result
             return run.info.run_id, None
 
     except Exception as exc:
-        return None, str(exc)
+        return None, f"mlflow tracking failed: {exc}"
