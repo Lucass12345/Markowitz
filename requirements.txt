@@ -11,3 +11,5 @@ joblib==1.4.2
 torch==2.6.0
 arch==7.2.0
 matplotlib==3.10.1
+fastapi==0.115.11
+uvicorn[standard]==0.34.0

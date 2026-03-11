@@ -1,18 +1,11 @@
 ﻿from __future__ import annotations
 
-from pathlib import Path
-import sys
+import os
 
 import pandas as pd
 import plotly.graph_objects as go
+import requests
 import streamlit as st
-
-ROOT = Path(__file__).resolve().parents[2]
-if str(ROOT) not in sys.path:
-    sys.path.append(str(ROOT))
-
-from app.db import init_db
-from app.repository import get_run_by_id, get_run_history
 
 st.set_page_config(
     page_title="Run History",
@@ -20,7 +13,7 @@ st.set_page_config(
     layout="wide",
 )
 
-init_db()
+API_BASE_URL = os.getenv("API_BASE_URL", "http://127.0.0.1:8000")
 
 
 def pretty_pct(x, digits: int = 2) -> str:
@@ -47,6 +40,18 @@ def render_metric_card(label: str, value: str) -> None:
         """,
         unsafe_allow_html=True,
     )
+
+
+def fetch_runs(api_base_url: str, limit: int = 200) -> list[dict]:
+    response = requests.get(f"{api_base_url}/runs", params={"limit": limit}, timeout=30)
+    response.raise_for_status()
+    return response.json()
+
+
+def fetch_run_detail(api_base_url: str, run_id: int) -> dict:
+    response = requests.get(f"{api_base_url}/runs/{run_id}", timeout=30)
+    response.raise_for_status()
+    return response.json()["run"]
 
 
 def build_frontier_figure(frontier_df: pd.DataFrame, comparison_df: pd.DataFrame) -> go.Figure:
@@ -89,17 +94,34 @@ def build_frontier_figure(frontier_df: pd.DataFrame, comparison_df: pd.DataFrame
 
 
 st.title("Saved Run History")
-st.caption("Database-backed history of saved Streamlit optimization runs.")
+st.caption("Run history served by FastAPI backend.")
 
-history_df = get_run_history(limit=200)
+api_base_url = st.sidebar.text_input("API base URL", value=API_BASE_URL)
 
-if history_df.empty:
-    st.info("No saved runs yet. Go back to the main app and save one.")
+left_top, right_top = st.columns([0.9, 1.1])
+with left_top:
+    if st.button("Refresh runs", use_container_width=True):
+        st.rerun()
+with right_top:
+    st.markdown(f"**Connected API:** `{api_base_url}`")
+
+try:
+    runs = fetch_runs(api_base_url=api_base_url, limit=200)
+except Exception as exc:
+    st.error(f"Could not load runs from API: {exc}")
     st.stop()
 
+if not runs:
+    st.info("No saved runs yet.")
+    st.stop()
+
+history_df = pd.DataFrame(runs)
+
 st.subheader("Latest runs")
+display_df = history_df.copy()
+
 st.dataframe(
-    history_df.style.format(
+    display_df.style.format(
         {
             "max_weight": "{:.2%}",
             "rf_annual_simple": "{:.2%}",
@@ -122,9 +144,10 @@ selected_run_id = st.selectbox(
     )(history_df.loc[history_df["id"] == rid].iloc[0]),
 )
 
-run = get_run_by_id(int(selected_run_id))
-if not run:
-    st.error("Selected run not found.")
+try:
+    run = fetch_run_detail(api_base_url=api_base_url, run_id=int(selected_run_id))
+except Exception as exc:
+    st.error(f"Could not load run detail: {exc}")
     st.stop()
 
 metrics = run["metrics_json"]
@@ -176,7 +199,7 @@ with right:
 
 st.plotly_chart(build_frontier_figure(frontier_df, comparison_df), use_container_width=True)
 
-tab1, tab2, tab3 = st.tabs(["Weights", "Block exposures", "Frontier data"])
+tab1, tab2, tab3, tab4 = st.tabs(["Weights", "Block exposures", "Frontier data", "Raw run JSON"])
 
 with tab1:
     st.dataframe(
@@ -205,3 +228,6 @@ with tab3:
         use_container_width=True,
         hide_index=True,
     )
+
+with tab4:
+    st.json(run)

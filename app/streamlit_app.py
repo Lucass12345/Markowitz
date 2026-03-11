@@ -1,11 +1,13 @@
 ﻿from __future__ import annotations
 
+import os
 from pathlib import Path
 import sys
 from typing import Any
 
 import pandas as pd
 import plotly.graph_objects as go
+import requests
 import streamlit as st
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -13,9 +15,6 @@ if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))
 
 from app.db import init_db
-from app.repository import save_run
-from app.tracking import track_run_mlflow
-from src.optimization.optimizer_service import optimize_portfolio_mode
 
 st.set_page_config(
     page_title="Markowitz AI Optimizer",
@@ -45,6 +44,8 @@ MODE_HELP = {
     "ai_returns_lstm": "Predicted expected returns from LSTM + historical covariance.",
     "ai_volatility": "Historical expected returns + covariance rescaled using predicted volatility.",
 }
+
+API_BASE_URL = os.getenv("API_BASE_URL", "http://127.0.0.1:8000")
 
 
 def inject_css() -> None:
@@ -112,18 +113,18 @@ def render_metric_card(label: str, value: str) -> None:
 
 
 def build_frontier_figure(result: dict) -> go.Figure:
-    frontier = result["frontier"].copy()
+    frontier_df = pd.DataFrame(result["frontier"])
     minvar = result["minvar"]["stats"]
     maxsharpe = result["maxsharpe"]["stats"]
     blocks = result["blocks"]["stats"]
 
     fig = go.Figure()
 
-    if not frontier.empty:
+    if not frontier_df.empty:
         fig.add_trace(
             go.Scatter(
-                x=frontier["vol_annual"],
-                y=frontier["return_annual"],
+                x=frontier_df["vol_annual"],
+                y=frontier_df["return_annual"],
                 mode="lines",
                 name="Efficient Frontier",
                 line=dict(width=3),
@@ -233,21 +234,40 @@ def build_block_exposure_chart(exposure_df: pd.DataFrame) -> go.Figure:
 
 
 @st.cache_data(show_spinner=False)
-def run_optimizer_cached(
+def check_api_health(api_base_url: str) -> dict:
+    response = requests.get(f"{api_base_url}/health", timeout=15)
+    response.raise_for_status()
+    return response.json()
+
+
+def call_optimize_api(
+    api_base_url: str,
     model_type: str,
-    targets_tuple: tuple,
+    targets: dict[str, float],
     max_weight: float,
     rf_annual_simple: float,
     n_frontier_points: int,
+    run_label: str,
 ) -> dict:
-    targets = dict(targets_tuple)
-    return optimize_portfolio_mode(
-        model_type=model_type,
-        targets=targets,
-        max_weight=max_weight,
-        rf_annual_simple=rf_annual_simple,
-        n_frontier_points=n_frontier_points,
+    payload = {
+        "model_type": model_type,
+        "targets": targets,
+        "max_weight": float(max_weight),
+        "rf_annual_simple": float(rf_annual_simple),
+        "n_frontier_points": int(n_frontier_points),
+        "run_label": run_label,
+    }
+
+    response = requests.post(
+        f"{api_base_url}/optimize",
+        json=payload,
+        timeout=300,
     )
+
+    if not response.ok:
+        raise RuntimeError(f"API error {response.status_code}: {response.text}")
+
+    return response.json()
 
 
 def build_comparison_df(result: dict) -> pd.DataFrame:
@@ -271,7 +291,13 @@ def build_comparison_df(result: dict) -> pd.DataFrame:
 
 def sidebar_controls() -> dict:
     st.sidebar.title("Portfolio Controls")
-    st.sidebar.caption("One optimization mode at a time, mounted on the current backend.")
+    st.sidebar.caption("Streamlit UI mounted on top of FastAPI backend.")
+
+    api_base_url = st.sidebar.text_input(
+        "API base URL",
+        value=API_BASE_URL,
+        help="FastAPI backend URL.",
+    )
 
     mode = st.sidebar.selectbox(
         "Optimization mode",
@@ -305,6 +331,11 @@ def sidebar_controls() -> dict:
     )
     n_frontier_points = st.sidebar.slider("Frontier points", 30, 200, 80, 10)
 
+    run_label = st.sidebar.text_input(
+        "Run label",
+        value=f"{mode}_streamlit_run",
+    )
+
     targets = normalize_targets(raw_targets) if normalize else raw_targets
     total = sum(targets.values())
 
@@ -316,11 +347,13 @@ def sidebar_controls() -> dict:
     run_clicked = st.sidebar.button("Run optimization", type="primary", use_container_width=True)
 
     return {
+        "api_base_url": api_base_url,
         "mode": mode,
         "targets": targets,
         "max_weight": max_weight,
         "rf_annual_simple": rf_annual_simple,
         "n_frontier_points": n_frontier_points,
+        "run_label": run_label,
         "run_clicked": run_clicked,
     }
 
@@ -330,9 +363,20 @@ def main() -> None:
     inject_css()
 
     st.title("Markowitz AI Portfolio Optimizer")
-    st.caption("Streamlit + DB + MLflow on top of the existing optimizer service. Zero repo rewrite.")
+    st.caption("Streamlit frontend consuming FastAPI backend.")
 
     controls = sidebar_controls()
+
+    top_health_left, top_health_right = st.columns([1, 2])
+    with top_health_left:
+        if st.button("Check API health", use_container_width=True):
+            try:
+                health = check_api_health(controls["api_base_url"])
+                st.success(f"API OK: {health}")
+            except Exception as exc:
+                st.error(f"API healthcheck failed: {exc}")
+    with top_health_right:
+        st.markdown(f"**Connected API:** `{controls['api_base_url']}`")
 
     selected_targets_df = pd.DataFrame(
         {
@@ -355,32 +399,50 @@ def main() -> None:
         st.markdown(f"**Max weight per asset:** {pretty_pct(controls['max_weight'])}")
         st.markdown(f"**Risk-free annual rate:** {pretty_pct(controls['rf_annual_simple'])}")
         st.markdown(f"**Frontier points:** {controls['n_frontier_points']}")
+        st.markdown(f"**Run label:** {controls['run_label']}")
         st.markdown(f"<div class='small-note'>{MODE_HELP[controls['mode']]}</div>", unsafe_allow_html=True)
 
     if controls["run_clicked"]:
         try:
-            with st.spinner("Running optimizer service..."):
-                result = run_optimizer_cached(
+            with st.spinner("Calling FastAPI /optimize ..."):
+                api_response = call_optimize_api(
+                    api_base_url=controls["api_base_url"],
                     model_type=controls["mode"],
-                    targets_tuple=tuple(controls["targets"].items()),
+                    targets=controls["targets"],
                     max_weight=float(controls["max_weight"]),
                     rf_annual_simple=float(controls["rf_annual_simple"]),
                     n_frontier_points=int(controls["n_frontier_points"]),
+                    run_label=controls["run_label"],
                 )
 
-            st.session_state["last_result"] = result
-            st.session_state["last_config"] = controls
+            st.session_state["last_api_response"] = api_response
+            st.session_state["last_result"] = api_response["result"]
+            st.session_state["last_run_id"] = api_response.get("run_id")
+            st.session_state["last_mlflow_run_id"] = api_response.get("mlflow_run_id")
+            st.session_state["last_mlflow_error"] = api_response.get("mlflow_error")
+            st.success("Optimization finished successfully.")
 
         except Exception as exc:
             st.error(f"Optimization failed: {exc}")
             st.stop()
 
     if "last_result" not in st.session_state:
-        st.info("Set the parameters in the sidebar and click Run optimization.")
+        st.info("Configure the portfolio and click Run optimization.")
         return
 
     result = st.session_state["last_result"]
-    config = st.session_state["last_config"]
+
+    info1, info2, info3 = st.columns(3)
+    with info1:
+        st.info(f"Run ID: {st.session_state.get('last_run_id')}")
+    with info2:
+        st.info(f"MLflow Run ID: {st.session_state.get('last_mlflow_run_id')}")
+    with info3:
+        mlflow_error = st.session_state.get("last_mlflow_error")
+        if mlflow_error:
+            st.warning(f"MLflow: {mlflow_error}")
+        else:
+            st.success("MLflow logging OK")
 
     block_stats = result["blocks"]["stats"]
     m1, m2, m3 = st.columns(3)
@@ -407,16 +469,19 @@ def main() -> None:
         hide_index=True,
     )
 
+    weights_df = pd.DataFrame(result["blocks"]["weights_df"])
+    exposure_df = pd.DataFrame(result["blocks"]["exposure_by_block"])
+    frontier_df = pd.DataFrame(result["frontier"])
+
     c1, c2 = st.columns([1.15, 0.85])
     with c1:
-        st.plotly_chart(build_weights_bar(result["blocks"]["weights_df"]), use_container_width=True)
+        st.plotly_chart(build_weights_bar(weights_df), use_container_width=True)
     with c2:
-        st.plotly_chart(build_block_exposure_chart(result["blocks"]["exposure_by_block"]), use_container_width=True)
+        st.plotly_chart(build_block_exposure_chart(exposure_df), use_container_width=True)
 
-    tab1, tab2, tab3 = st.tabs(["Weights detail", "Block exposures", "Frontier data"])
+    tab1, tab2, tab3, tab4 = st.tabs(["Weights detail", "Block exposures", "Frontier data", "Raw API response"])
 
     with tab1:
-        weights_df = result["blocks"]["weights_df"].copy()
         st.dataframe(
             weights_df.style.format({"weight": "{:.2%}"}),
             use_container_width=True,
@@ -425,13 +490,12 @@ def main() -> None:
         st.download_button(
             "Download weights CSV",
             data=weights_df.to_csv(index=False).encode("utf-8"),
-            file_name=f"weights_{config['mode']}.csv",
+            file_name=f"weights_{controls['mode']}.csv",
             mime="text/csv",
             use_container_width=True,
         )
 
     with tab2:
-        exposure_df = result["blocks"]["exposure_by_block"].copy()
         st.dataframe(
             exposure_df.style.format(
                 {"target": "{:.2%}", "achieved": "{:.2%}", "diff": "{:+.2%}"}
@@ -442,13 +506,12 @@ def main() -> None:
         st.download_button(
             "Download block exposure CSV",
             data=exposure_df.to_csv(index=False).encode("utf-8"),
-            file_name=f"block_exposure_{config['mode']}.csv",
+            file_name=f"block_exposure_{controls['mode']}.csv",
             mime="text/csv",
             use_container_width=True,
         )
 
     with tab3:
-        frontier_df = result["frontier"].copy()
         st.dataframe(
             frontier_df.style.format(
                 {
@@ -464,54 +527,23 @@ def main() -> None:
         st.download_button(
             "Download frontier CSV",
             data=frontier_df.to_csv(index=False).encode("utf-8"),
-            file_name=f"frontier_{config['mode']}.csv",
+            file_name=f"frontier_{controls['mode']}.csv",
             mime="text/csv",
             use_container_width=True,
         )
 
-    st.markdown("---")
-    st.subheader("Persist run")
-
-    save_col1, save_col2 = st.columns([1.2, 0.8])
-    with save_col1:
-        run_label = st.text_input(
-            "Run label",
-            value=f"{config['mode']}_run",
-            help="Optional human-friendly label for DB and MLflow.",
-        )
-    with save_col2:
-        st.markdown("<br>", unsafe_allow_html=True)
-        save_clicked = st.button("Save current run", type="secondary", use_container_width=True)
-
-    if save_clicked:
-        try:
-            run_db_id = save_run(run_label=run_label, config=config, result=result)
-            mlflow_run_id, mlflow_error = track_run_mlflow(
-                run_db_id=run_db_id,
-                run_label=run_label,
-                config=config,
-                result=result,
-            )
-
-            st.success(f"Run saved to database with id={run_db_id}")
-
-            if mlflow_run_id:
-                st.info(f"Also logged to MLflow with run_id={mlflow_run_id}")
-            elif mlflow_error:
-                st.warning(f"Saved in DB, but MLflow logging failed/skipped: {mlflow_error}")
-
-        except Exception as exc:
-            st.error(f"Could not save run: {exc}")
+    with tab4:
+        st.json(st.session_state["last_api_response"])
 
     with st.expander("Technical notes"):
         st.markdown(
             f"""
-- Backend entry point: `src.optimization.optimizer_service.optimize_portfolio_mode`
-- Selected mode: `{config['mode']}`
+- UI calls FastAPI at: `{controls['api_base_url']}`
+- Selected mode: `{controls['mode']}`
 - Solver message: `{result['blocks'].get('solver_message', 'N/A')}`
-- Storage layer: SQLAlchemy over Postgres or local SQLite fallback
-- Tracking layer: MLflow
-- Multipage app: Streamlit with saved run history page
+- Run ID: `{st.session_state.get('last_run_id')}`
+- MLflow Run ID: `{st.session_state.get('last_mlflow_run_id')}`
+- This app no longer calls the optimizer directly.
             """
         )
 
