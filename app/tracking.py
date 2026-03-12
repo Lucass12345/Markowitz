@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from infrastructure.storage.minio_client import upload_text
+
 
 def track_run_mlflow(run_db_id: int, run_label: str | None, config: dict, result: dict) -> tuple[str | None, str | None]:
     """
@@ -77,7 +79,7 @@ def track_run_mlflow(run_db_id: int, run_label: str | None, config: dict, result
             )
 
             # -------------------------
-            # Artifacts
+            # Local temp artifacts
             # -------------------------
             with tempfile.TemporaryDirectory() as tmpdir:
                 tmp_path = Path(tmpdir)
@@ -87,10 +89,9 @@ def track_run_mlflow(run_db_id: int, run_label: str | None, config: dict, result
                 exposure_path = tmp_path / "block_exposure.csv"
                 comparison_path = tmp_path / "comparison.csv"
 
-                pd.DataFrame(result["frontier"]).to_csv(frontier_path, index=False)
-                pd.DataFrame(result["blocks"]["weights_df"]).to_csv(weights_path, index=False)
-                pd.DataFrame(result["blocks"]["exposure_by_block"]).to_csv(exposure_path, index=False)
-
+                frontier_df = pd.DataFrame(result["frontier"])
+                weights_df = pd.DataFrame(result["blocks"]["weights_df"])
+                exposure_df = pd.DataFrame(result["blocks"]["exposure_by_block"])
                 comparison_df = pd.DataFrame(
                     [
                         {
@@ -107,12 +108,55 @@ def track_run_mlflow(run_db_id: int, run_label: str | None, config: dict, result
                         },
                     ]
                 )
+
+                frontier_df.to_csv(frontier_path, index=False)
+                weights_df.to_csv(weights_path, index=False)
+                exposure_df.to_csv(exposure_path, index=False)
                 comparison_df.to_csv(comparison_path, index=False)
 
+                # MLflow artifacts
                 mlflow.log_artifact(str(frontier_path), artifact_path="tables")
                 mlflow.log_artifact(str(weights_path), artifact_path="tables")
                 mlflow.log_artifact(str(exposure_path), artifact_path="tables")
                 mlflow.log_artifact(str(comparison_path), artifact_path="tables")
+
+                # MinIO artifacts
+                bucket = "optimization-runs"
+                prefix = f"run_{run_db_id}"
+
+                minio_frontier = upload_text(
+                    bucket_name=bucket,
+                    object_name=f"{prefix}/frontier.csv",
+                    text=frontier_df.to_csv(index=False),
+                    content_type="text/csv",
+                )
+                minio_weights = upload_text(
+                    bucket_name=bucket,
+                    object_name=f"{prefix}/weights_blocks.csv",
+                    text=weights_df.to_csv(index=False),
+                    content_type="text/csv",
+                )
+                minio_exposure = upload_text(
+                    bucket_name=bucket,
+                    object_name=f"{prefix}/block_exposure.csv",
+                    text=exposure_df.to_csv(index=False),
+                    content_type="text/csv",
+                )
+                minio_comparison = upload_text(
+                    bucket_name=bucket,
+                    object_name=f"{prefix}/comparison.csv",
+                    text=comparison_df.to_csv(index=False),
+                    content_type="text/csv",
+                )
+
+                mlflow.set_tags(
+                    {
+                        "minio_frontier_path": minio_frontier,
+                        "minio_weights_path": minio_weights,
+                        "minio_exposure_path": minio_exposure,
+                        "minio_comparison_path": minio_comparison,
+                    }
+                )
 
             return run.info.run_id, None
 

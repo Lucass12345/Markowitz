@@ -4,7 +4,6 @@ import io
 import os
 
 from minio import Minio
-from minio.error import S3Error
 
 
 MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "127.0.0.1:9000")
@@ -15,7 +14,7 @@ MINIO_SECURE = os.getenv("MINIO_SECURE", "false").lower() == "true"
 
 def get_minio_client() -> Minio:
     return Minio(
-        MINIO_ENDPOINT,
+        endpoint=MINIO_ENDPOINT,
         access_key=MINIO_ACCESS_KEY,
         secret_key=MINIO_SECRET_KEY,
         secure=MINIO_SECURE,
@@ -24,8 +23,7 @@ def get_minio_client() -> Minio:
 
 def ensure_bucket_exists(bucket_name: str) -> None:
     client = get_minio_client()
-    found = client.bucket_exists(bucket_name)
-    if not found:
+    if not client.bucket_exists(bucket_name):
         client.make_bucket(bucket_name)
 
 
@@ -44,3 +42,12 @@ def upload_bytes(bucket_name: str, object_name: str, content: bytes, content_typ
     )
 
     return f"s3://{bucket_name}/{object_name}"
+
+
+def upload_text(bucket_name: str, object_name: str, text: str, content_type: str = "text/plain; charset=utf-8") -> str:
+    return upload_bytes(
+        bucket_name=bucket_name,
+        object_name=object_name,
+        content=text.encode("utf-8"),
+        content_type=content_type,
+    )

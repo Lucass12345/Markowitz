@@ -176,3 +176,8 @@ cd /d C:\Users\lucas\OneDrive\Documentos\GitHub\Markowitz
 C:\Users\lucas\anaconda3\envs\IIA_cuda_env\python.exe -m mlflow ui --backend-store-uri "file:///C:/Users/lucas/OneDrive/Documentos/GitHub/Markowitz/mlruns" --port 5005
 
 http://127.0.0.1:5005
+
+docker minio:
+docker rm -f markowitz-minio
+docker run -d --name markowitz-minio -p 9000:9000 -p 9001:9001 -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin minio/minio server /data --console-address ":9001"
+docker ps
