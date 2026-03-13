@@ -1,3 +1,4 @@
+
 import numpy as np
 import pandas as pd
 
@@ -7,13 +8,6 @@ def build_lstm_sequences(
     seq_len: int = 20,
     forecast_horizon: int = 5
 ):
-    """
-    Input:
-        ventana de retornos pasados de largo seq_len
-
-    Target:
-        retorno acumulado futuro de los próximos forecast_horizon días
-    """
     s = series.dropna().astype(float).values
 
     X, y = [], []
@@ -31,26 +25,13 @@ def build_lstm_sequences(
     return X, y
 
 
-# ---------------------------
-# NUEVA FUNCIÓN MULTIFEATURE
-# ---------------------------
-
 def build_lstm_sequences_multifeature(
     feature_df: pd.DataFrame,
     target_series: pd.Series,
     seq_len: int = 20,
     forecast_horizon: int = 5,
+    target_aggregation: str = "mean",
 ):
-    """
-    Construye secuencias LSTM cuando tenemos múltiples features.
-
-    feature_df:
-        DataFrame con columnas de features
-
-    target_series:
-        Serie con el retorno que queremos predecir
-    """
-
     X, y = [], []
 
     df = feature_df.copy()
@@ -65,7 +46,12 @@ def build_lstm_sequences_multifeature(
 
     for i in range(seq_len, len(aligned) - forecast_horizon + 1):
         x_window = values[i - seq_len:i]
-        y_future = t[i:i + forecast_horizon].mean()
+        future_slice = t[i:i + forecast_horizon]
+
+        if target_aggregation == "sum":
+            y_future = future_slice.sum()
+        else:
+            y_future = future_slice.mean()
 
         X.append(x_window)
         y.append(y_future)
@@ -74,4 +60,3 @@ def build_lstm_sequences_multifeature(
     y = np.array(y, dtype=np.float32)
 
     return X, y
-

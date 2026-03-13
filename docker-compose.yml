@@ -89,6 +89,7 @@
       MLFLOW_UI_URL: ${MLFLOW_UI_URL:-http://localhost:5005}
       MINIO_CONSOLE_URL: ${MINIO_CONSOLE_URL:-http://localhost:9001}
       STREAMLIT_SERVER_HEADLESS: "true"
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg2://markowitz_user:markowitz_pass@postgres:5432/markowitz}
     ports:
       - "8502:8501"
     volumes:
