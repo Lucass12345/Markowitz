@@ -1,0 +1,21 @@
+{
+  "ticker": "EFA",
+  "selected_features": [
+    "return",
+    "lag_1",
+    "lag_2",
+    "rolling_mean_5",
+    "rolling_std_5"
+  ],
+  "seq_len": 20,
+  "forecast_horizon": 5,
+  "hidden_size": 64,
+  "num_layers": 2,
+  "dropout": 0.2,
+  "lr": 0.001,
+  "metrics": {
+    "rmse_test": 0.0044103823602199554,
+    "mae_test": 0.00310712493956089,
+    "best_val_loss": 6.593017133127432e-06
+  }
+}

@@ -154,7 +154,7 @@ def train_all_return_models_lstm(
             )
 
         # Clip defensivo del retorno acumulado futuro a 5 días
-        last_pred = max(min(last_pred, 0.05), -0.05)
+        last_pred = max(min(last_pred, 0.02), -0.02)
 
         metrics = {
             "mse_test": float(np.mean((y_test - y_pred_test) ** 2)),
