@@ -1,10 +1,16 @@
-
-from __future__ import annotations
-
 import pandas as pd
+from sqlalchemy import create_engine
+from app.db import DATABASE_URL
 
-from app.lstm_lab_storage import load_active_predictions_df
+def load_active_lstm_predictions_df():
+    engine = create_engine(DATABASE_URL)
 
+    query = """
+    SELECT prt.ticker, prt.mu_pred
+    FROM prediction_runs pr
+    JOIN prediction_run_tickers prt ON pr.run_id = prt.run_id
+    WHERE pr.is_active = 1
+    """
 
-def load_active_lstm_predictions_df() -> pd.DataFrame:
-    return load_active_predictions_df()
+    df = pd.read_sql(query, engine)
+    return df
