@@ -24,15 +24,7 @@ from src.models.train_returns_lstm_lab import run_lstm_lab
 from app.lstm_lab_storage import get_prediction_runs_df, set_active_prediction_run
 
 
-st.set_page_config(page_title="LSTM Lab", page_icon="🧠", layout="wide")
-st.title("LSTM Lab")
-st.caption("Full-universe configurable LSTM training, prediction, ranking, filtering and ticker-level inspection.")
-
-RETURNS = load_returns()
-ALL_TICKERS = list(RETURNS.columns)
-
-
-def get_prices():
+def get_prices(returns: pd.DataFrame) -> pd.DataFrame:
     global load_prices
     if load_prices is not None:
         try:
@@ -42,11 +34,8 @@ def get_prices():
         except Exception:
             pass
 
-    synthetic = (1 + RETURNS.fillna(0)).cumprod() * 100
+    synthetic = (1 + returns.fillna(0)).cumprod() * 100
     return synthetic
-
-
-PRICES = get_prices()
 
 
 def load_latest_saved_result():
@@ -87,7 +76,6 @@ def build_selected_features():
 
     with st.sidebar:
         st.header("Configuration")
-
         st.subheader("Feature selection")
 
         with st.expander("Base features", expanded=True):
@@ -106,16 +94,26 @@ def build_selected_features():
             f_m5 = st.checkbox("momentum_5", value=False)
             f_m20 = st.checkbox("momentum_20", value=False)
 
-        if f_return: selected.append("return")
-        if f_lag1: selected.append("lag_1")
-        if f_lag2: selected.append("lag_2")
-        if f_lag3: selected.append("lag_3")
-        if f_rm5: selected.append("rolling_mean_5")
-        if f_rs5: selected.append("rolling_std_5")
-        if f_rm20: selected.append("rolling_mean_20")
-        if f_rs20: selected.append("rolling_std_20")
-        if f_m5: selected.append("momentum_5")
-        if f_m20: selected.append("momentum_20")
+        if f_return:
+            selected.append("return")
+        if f_lag1:
+            selected.append("lag_1")
+        if f_lag2:
+            selected.append("lag_2")
+        if f_lag3:
+            selected.append("lag_3")
+        if f_rm5:
+            selected.append("rolling_mean_5")
+        if f_rs5:
+            selected.append("rolling_std_5")
+        if f_rm20:
+            selected.append("rolling_mean_20")
+        if f_rs20:
+            selected.append("rolling_std_20")
+        if f_m5:
+            selected.append("momentum_5")
+        if f_m20:
+            selected.append("momentum_20")
 
         start_date = st.selectbox(
             "Training data start date",
@@ -149,98 +147,7 @@ def build_selected_features():
     }
 
 
-cfg = build_selected_features()
-
-st.info(
-    f"""**Universe:** all available tickers in returns dataset (`{len(ALL_TICKERS)}` assets)  
-**Target:** `{cfg["target_aggregation"]}` of next `{cfg["forecast_horizon"]}` trading-day returns  
-**Input window:** last `{cfg["seq_len"]}` trading days  
-**Training data start:** `{cfg["start_date"]}`  
-**Selected features:** {", ".join(cfg["selected_features"]) if cfg["selected_features"] else "None"}"""
-)
-
-run_button = st.button("Train and generate full-universe predictions", use_container_width=True)
-
-if run_button:
-    if not cfg["selected_features"]:
-        st.error("Select at least one feature.")
-        st.stop()
-
-    with st.spinner("Training configurable LSTM models for all available tickers..."):
-        result = run_lstm_lab(
-            selected_features=cfg["selected_features"],
-            seq_len=cfg["seq_len"],
-            forecast_horizon=cfg["forecast_horizon"],
-            target_aggregation=cfg["target_aggregation"],
-            start_date=cfg["start_date"],
-            epochs=cfg["epochs"],
-            batch_size=cfg["batch_size"],
-            lr=cfg["lr"],
-            hidden_size=cfg["hidden_size"],
-            num_layers=cfg["num_layers"],
-            dropout=cfg["dropout"],
-        )
-    st.session_state["lstm_lab_result"] = result
-
-if "lstm_lab_result" not in st.session_state:
-    latest = load_latest_saved_result()
-    if latest is not None:
-        st.session_state["lstm_lab_result"] = latest
-
-result = st.session_state.get("lstm_lab_result")
-
-runs_df = get_prediction_runs_df()
-
-with st.expander("Stored LSTM prediction runs (Postgres)", expanded=False):
-    if runs_df.empty:
-        st.info("No prediction runs stored in Postgres yet.")
-    else:
-        st.dataframe(runs_df, use_container_width=True, hide_index=True)
-        active_candidates = runs_df["run_id"].tolist()
-        selected_active = st.selectbox("Set active run for optimizer", active_candidates)
-        if st.button("Set selected run as active"):
-            set_active_prediction_run(selected_active)
-            st.success(f"Active prediction run set to: {selected_active}")
-            st.rerun()
-
-if result is None:
-    st.warning("No LSTM Lab run available yet. Launch one from this page.")
-    st.stop()
-
-pred_df = result["predictions"].copy()
-metrics_df = result["metrics"].copy()
-summary = result.get("summary", {})
-
-if pred_df.empty or metrics_df.empty:
-    st.warning("Run completed but no predictions/metrics were generated.")
-    st.stop()
-
-merged = metrics_df.merge(pred_df, on=["ticker", "mu_pred"], how="outer")
-
-st.success(f"LSTM run available: {result['run_id']}")
-c1, c2, c3, c4 = st.columns(4)
-with c1:
-    st.metric("Universe size", int(summary.get("total_tickers_in_universe", len(ALL_TICKERS))))
-with c2:
-    st.metric("Tickers predicted", int(summary.get("tickers_with_predictions", len(pred_df))))
-with c3:
-    st.metric("Mean RMSE test", f"{merged['rmse_test'].mean():.6f}" if "rmse_test" in merged.columns else "-")
-with c4:
-    st.metric("Mean dir. acc. test", f"{merged['dir_acc_test'].mean():.2%}" if "dir_acc_test" in merged.columns else "-")
-
-c5, c6, c7, c8 = st.columns(4)
-with c5:
-    st.metric("Mean mu_pred", f"{pred_df['mu_pred'].mean():.6f}")
-with c6:
-    st.metric("Median mu_pred", f"{pred_df['mu_pred'].median():.6f}")
-with c7:
-    st.metric("Min mu_pred", f"{pred_df['mu_pred'].min():.6f}")
-with c8:
-    st.metric("Max mu_pred", f"{pred_df['mu_pred'].max():.6f}")
-
-tab1, tab2, tab3, tab4 = st.tabs(["Overview", "Rankings", "Filter & Table", "Ticker Detail"])
-
-with tab1:
+def render_overview(pred_df: pd.DataFrame, merged: pd.DataFrame, result: dict):
     col_left, col_right = st.columns(2)
 
     with col_left:
@@ -251,48 +158,60 @@ with tab1:
     with col_right:
         st.subheader("RMSE test distribution")
         if "rmse_test" in merged.columns:
-            fig_rmse = px.histogram(merged.dropna(subset=["rmse_test"]), x="rmse_test", nbins=30)
+            fig_rmse = px.histogram(
+                merged.dropna(subset=["rmse_test"]),
+                x="rmse_test",
+                nbins=30,
+            )
             st.plotly_chart(fig_rmse, use_container_width=True)
 
     st.subheader("Artifacts")
     st.code(
-        f"Run ID: {result['run_id']}\\n"
-        f"Predictions: {result['predictions_path']}\\n"
-        f"Metrics: {result['metrics_path']}\\n"
-        f"Per ticker predictions: {result['per_ticker_dir']}\\n"
+        f"Run ID: {result['run_id']}\n"
+        f"Predictions: {result['predictions_path']}\n"
+        f"Metrics: {result['metrics_path']}\n"
+        f"Per ticker predictions: {result['per_ticker_dir']}\n"
         f"Loss curves: {result['curves_dir']}"
     )
 
-with tab2:
+
+def render_rankings(merged: pd.DataFrame):
     c1, c2 = st.columns(2)
 
     with c1:
         st.subheader("Top 5 best model quality")
-        quality_df = merged.dropna(subset=["rmse_test"]).sort_values(["rmse_test", "mae_test"], ascending=[True, True]).head(5)
-        st.dataframe(
-            quality_df[["ticker", "rmse_test", "mae_test", "dir_acc_test", "corr_test", "mu_pred"]],
-            use_container_width=True,
-            hide_index=True,
+        quality_df = (
+            merged.dropna(subset=["rmse_test"])
+            .sort_values(["rmse_test", "mae_test"], ascending=[True, True])
+            .head(5)
         )
-
         if not quality_df.empty:
+            st.dataframe(
+                quality_df[["ticker", "rmse_test", "mae_test", "dir_acc_test", "corr_test", "mu_pred"]],
+                use_container_width=True,
+                hide_index=True,
+            )
             fig_quality = px.bar(quality_df, x="ticker", y="rmse_test", title="Top 5 lowest RMSE test")
             st.plotly_chart(fig_quality, use_container_width=True)
+        else:
+            st.info("No quality metrics available.")
 
     with c2:
         st.subheader("Top 5 highest predicted returns")
         opp_df = merged.sort_values("mu_pred", ascending=False).head(5)
-        st.dataframe(
-            opp_df[["ticker", "mu_pred", "rmse_test", "dir_acc_test", "corr_test"]],
-            use_container_width=True,
-            hide_index=True,
-        )
-
         if not opp_df.empty:
+            st.dataframe(
+                opp_df[["ticker", "mu_pred", "rmse_test", "dir_acc_test", "corr_test"]],
+                use_container_width=True,
+                hide_index=True,
+            )
             fig_opp = px.bar(opp_df, x="ticker", y="mu_pred", title="Top 5 highest mu_pred")
             st.plotly_chart(fig_opp, use_container_width=True)
+        else:
+            st.info("No predictions available.")
 
-with tab3:
+
+def render_filter_table(merged: pd.DataFrame):
     st.subheader("Global filtered table")
 
     colf1, colf2, colf3 = st.columns(3)
@@ -301,33 +220,48 @@ with tab3:
     with colf2:
         min_dir_acc = st.slider("Min directional accuracy test", 0.0, 1.0, 0.0, 0.01)
     with colf3:
-        max_rmse = st.number_input(
-            "Max RMSE test",
-            min_value=0.0,
-            value=float(np.nanmax(merged["rmse_test"])) if "rmse_test" in merged.columns and merged["rmse_test"].notna().any() else 1.0
+        rmse_default = (
+            float(np.nanmax(merged["rmse_test"]))
+            if "rmse_test" in merged.columns and merged["rmse_test"].notna().any()
+            else 1.0
         )
+        max_rmse = st.number_input("Max RMSE test", min_value=0.0, value=rmse_default)
 
     filtered = merged.copy()
 
     if search_ticker.strip():
-        filtered = filtered[filtered["ticker"].astype(str).str.contains(search_ticker.strip(), case=False, na=False)]
+        filtered = filtered[
+            filtered["ticker"].astype(str).str.contains(search_ticker.strip(), case=False, na=False)
+        ]
 
     if "dir_acc_test" in filtered.columns:
-        filtered = filtered[(filtered["dir_acc_test"].isna()) | (filtered["dir_acc_test"] >= min_dir_acc)]
+        filtered = filtered[
+            (filtered["dir_acc_test"].isna()) | (filtered["dir_acc_test"] >= min_dir_acc)
+        ]
 
     if "rmse_test" in filtered.columns:
-        filtered = filtered[(filtered["rmse_test"].isna()) | (filtered["rmse_test"] <= max_rmse)]
+        filtered = filtered[
+            (filtered["rmse_test"].isna()) | (filtered["rmse_test"] <= max_rmse)
+        ]
 
-    filtered = filtered.sort_values(["mu_pred", "dir_acc_test"], ascending=[False, False])
+    sort_cols = [c for c in ["mu_pred", "dir_acc_test"] if c in filtered.columns]
+    if sort_cols:
+        filtered = filtered.sort_values(sort_cols, ascending=[False] * len(sort_cols))
+
     st.dataframe(filtered, use_container_width=True, hide_index=True)
 
-with tab4:
+
+def render_ticker_detail(merged: pd.DataFrame, result: dict, summary: dict, prices: pd.DataFrame):
     st.subheader("Ticker detail")
 
     ticker_options = list(merged["ticker"].dropna().astype(str).unique())
-    selected_ticker = st.selectbox("Select ticker", options=ticker_options)
+    if not ticker_options:
+        st.info("No ticker details available.")
+        return
 
+    selected_ticker = st.selectbox("Select ticker", options=ticker_options)
     ticker_row = merged[merged["ticker"] == selected_ticker].iloc[0]
+
     detail_cols = st.columns(5)
     with detail_cols[0]:
         st.metric("mu_pred", f"{float(ticker_row['mu_pred']):.6f}")
@@ -352,40 +286,40 @@ with tab4:
         st.dataframe(split_metrics, use_container_width=True, hide_index=True)
 
     with sub2:
-        prices_t = PRICES[selected_ticker].dropna().copy()
-        last_5 = prices_t.tail(5)
+        if selected_ticker in prices.columns:
+            prices_t = prices[selected_ticker].dropna().copy()
+            last_5 = prices_t.tail(5)
 
-        if not last_5.empty:
-            last_date = pd.to_datetime(last_5.index[-1])
-            future_date = pd.bdate_range(last_date, periods=int(summary.get("forecast_horizon", 5)) + 1)[-1]
-            last_price = float(last_5.iloc[-1])
-            mu_pred = float(ticker_row["mu_pred"])
-            horizon = int(summary.get("forecast_horizon", 5))
-            projected_price = float(last_price * ((1 + mu_pred) ** horizon))
+            if not last_5.empty:
+                last_date = pd.to_datetime(last_5.index[-1])
+                future_date = pd.bdate_range(last_date, periods=int(summary.get("forecast_horizon", 5)) + 1)[-1]
+                last_price = float(last_5.iloc[-1])
+                mu_pred = float(ticker_row["mu_pred"])
+                horizon = int(summary.get("forecast_horizon", 5))
+                projected_price = float(last_price * ((1 + mu_pred) ** horizon))
 
-            chart_df = pd.DataFrame({
-                "date": list(pd.to_datetime(last_5.index)) + [future_date],
-                "price": list(last_5.values) + [projected_price],
-                "type": ["historical"] * len(last_5) + ["projected"],
-            })
+                chart_df = pd.DataFrame({
+                    "date": list(pd.to_datetime(last_5.index)) + [future_date],
+                    "price": list(last_5.values) + [projected_price],
+                    "type": ["historical"] * len(last_5) + ["projected"],
+                })
 
-            fig_price = go.Figure()
-            fig_price.add_trace(go.Scatter(
-                x=chart_df[chart_df["type"] == "historical"]["date"],
-                y=chart_df[chart_df["type"] == "historical"]["price"],
-                mode="lines+markers",
-                name="Historical price"
-            ))
-            fig_price.add_trace(go.Scatter(
-                x=[last_5.index[-1], future_date],
-                y=[last_price, projected_price],
-                mode="lines+markers",
-                name="Projection"
-            ))
-            fig_price.update_layout(title=f"{selected_ticker}: last 5 prices + projected price")
-            st.plotly_chart(fig_price, use_container_width=True)
-
-            st.caption(f"Projected price in {horizon} trading days: {projected_price:.4f}")
+                fig_price = go.Figure()
+                fig_price.add_trace(go.Scatter(
+                    x=chart_df[chart_df["type"] == "historical"]["date"],
+                    y=chart_df[chart_df["type"] == "historical"]["price"],
+                    mode="lines+markers",
+                    name="Historical price",
+                ))
+                fig_price.add_trace(go.Scatter(
+                    x=[last_5.index[-1], future_date],
+                    y=[last_price, projected_price],
+                    mode="lines+markers",
+                    name="Projection",
+                ))
+                fig_price.update_layout(title=f"{selected_ticker}: last 5 prices + projected price")
+                st.plotly_chart(fig_price, use_container_width=True)
+                st.caption(f"Projected price in {horizon} trading days: {projected_price:.4f}")
 
     pred_file = Path(result["per_ticker_dir"]) / f"{selected_ticker}_predictions.csv"
     if pred_file.exists():
@@ -406,7 +340,6 @@ with tab4:
                     fig_det.add_trace(go.Scatter(x=sub["date"], y=sub["y_pred"], mode="lines", name=f"y_pred_{split}"))
             fig_det.update_layout(title=f"{selected_ticker}: actual vs predicted returns")
             st.plotly_chart(fig_det, use_container_width=True)
-
             st.dataframe(plot_detail.tail(30), use_container_width=True, hide_index=True)
 
     loss_file = Path(result["curves_dir"]) / f"{selected_ticker}_losses.csv"
@@ -418,3 +351,119 @@ with tab4:
         fig_loss.add_trace(go.Scatter(x=losses["epoch"], y=losses["val_loss"], mode="lines", name="val_loss"))
         fig_loss.update_layout(title=f"{selected_ticker}: train vs val loss")
         st.plotly_chart(fig_loss, use_container_width=True)
+
+
+def main():
+    st.set_page_config(page_title="LSTM Lab", page_icon="🧠", layout="wide")
+    st.title("LSTM Lab")
+    st.caption("Full-universe configurable LSTM training, prediction, ranking, filtering and ticker-level inspection.")
+
+    returns = load_returns()
+    all_tickers = list(returns.columns)
+    prices = get_prices(returns)
+    cfg = build_selected_features()
+
+    st.info(
+        f"""**Universe:** all available tickers in returns dataset (`{len(all_tickers)}` assets)  
+**Target:** `{cfg["target_aggregation"]}` of next `{cfg["forecast_horizon"]}` trading-day returns  
+**Input window:** last `{cfg["seq_len"]}` trading days  
+**Training data start:** `{cfg["start_date"]}`  
+**Selected features:** {", ".join(cfg["selected_features"]) if cfg["selected_features"] else "None"}"""
+    )
+
+    run_button = st.button("Train and generate full-universe predictions", use_container_width=True)
+
+    if run_button:
+        if not cfg["selected_features"]:
+            st.error("Select at least one feature.")
+            st.stop()
+
+        with st.spinner("Training configurable LSTM models for all available tickers..."):
+            result = run_lstm_lab(
+                selected_features=cfg["selected_features"],
+                seq_len=cfg["seq_len"],
+                forecast_horizon=cfg["forecast_horizon"],
+                target_aggregation=cfg["target_aggregation"],
+                start_date=cfg["start_date"],
+                epochs=cfg["epochs"],
+                batch_size=cfg["batch_size"],
+                lr=cfg["lr"],
+                hidden_size=cfg["hidden_size"],
+                num_layers=cfg["num_layers"],
+                dropout=cfg["dropout"],
+            )
+        st.session_state["lstm_lab_result"] = result
+
+    if "lstm_lab_result" not in st.session_state:
+        latest = load_latest_saved_result()
+        if latest is not None:
+            st.session_state["lstm_lab_result"] = latest
+
+    result = st.session_state.get("lstm_lab_result")
+
+    runs_df = get_prediction_runs_df()
+
+    with st.expander("Stored LSTM prediction runs (Postgres)", expanded=False):
+        if runs_df.empty:
+            st.info("No prediction runs stored in Postgres yet.")
+        else:
+            st.dataframe(runs_df, use_container_width=True, hide_index=True)
+            active_candidates = runs_df["run_id"].tolist()
+            selected_active = st.selectbox("Set active run for optimizer", active_candidates)
+            if st.button("Set selected run as active"):
+                set_active_prediction_run(selected_active)
+                st.success(f"Active prediction run set to: {selected_active}")
+                st.rerun()
+
+    if result is None:
+        st.warning("No LSTM Lab run available yet. Launch one from this page.")
+        return
+
+    pred_df = result["predictions"].copy()
+    metrics_df = result["metrics"].copy()
+    summary = result.get("summary", {})
+
+    if pred_df.empty or metrics_df.empty:
+        st.warning("Run completed but no predictions/metrics were generated.")
+        return
+
+    merged = metrics_df.merge(pred_df, on=["ticker", "mu_pred"], how="outer")
+
+    st.success(f"LSTM run available: {result['run_id']}")
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        st.metric("Universe size", int(summary.get("total_tickers_in_universe", len(all_tickers))))
+    with c2:
+        st.metric("Tickers predicted", int(summary.get("tickers_with_predictions", len(pred_df))))
+    with c3:
+        st.metric("Mean RMSE test", f"{merged['rmse_test'].mean():.6f}" if "rmse_test" in merged.columns else "-")
+    with c4:
+        st.metric("Mean dir. acc. test", f"{merged['dir_acc_test'].mean():.2%}" if "dir_acc_test" in merged.columns else "-")
+
+    c5, c6, c7, c8 = st.columns(4)
+    with c5:
+        st.metric("Mean mu_pred", f"{pred_df['mu_pred'].mean():.6f}")
+    with c6:
+        st.metric("Median mu_pred", f"{pred_df['mu_pred'].median():.6f}")
+    with c7:
+        st.metric("Min mu_pred", f"{pred_df['mu_pred'].min():.6f}")
+    with c8:
+        st.metric("Max mu_pred", f"{pred_df['mu_pred'].max():.6f}")
+
+    tab1, tab2, tab3, tab4 = st.tabs(["Overview", "Rankings", "Filter & Table", "Ticker Detail"])
+
+    with tab1:
+        render_overview(pred_df, merged, result)
+
+    with tab2:
+        render_rankings(merged)
+
+    with tab3:
+        render_filter_table(merged)
+
+    with tab4:
+        render_ticker_detail(merged, result, summary, prices)
+
+
+if __name__ == "__main__":
+    main()
