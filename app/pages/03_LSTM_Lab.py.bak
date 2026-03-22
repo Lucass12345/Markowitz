@@ -22,6 +22,7 @@ except Exception:
     load_prices = None
 
 from src.models.train_returns_lstm_lab import run_lstm_lab
+from app.lstm_lab_storage import get_prediction_runs_df, set_active_prediction_run
 
 
 st.set_page_config(page_title="LSTM Lab", page_icon="🧠", layout="wide")
@@ -87,7 +88,6 @@ def build_selected_features():
 
     with st.sidebar:
         st.header("Configuration")
-
         st.subheader("Feature selection")
 
         with st.expander("Base features", expanded=True):
@@ -152,10 +152,10 @@ def build_selected_features():
 cfg = build_selected_features()
 
 st.info(
-    f"""\n**Universe:** all available tickers in returns dataset (`{len(ALL_TICKERS)}` assets)  \n
-**Target:** `{cfg["target_aggregation"]}` of next `{cfg["forecast_horizon"]}` trading-day returns  \n
-**Input window:** last `{cfg["seq_len"]}` trading days  \n
-**Training data start:** `{cfg["start_date"]}`  \n
+    f"""\n**Universe:** all available tickers in returns dataset (`{len(ALL_TICKERS)}` assets)  
+**Target:** `{cfg["target_aggregation"]}` of next `{cfg["forecast_horizon"]}` trading-day returns  
+**Input window:** last `{cfg["seq_len"]}` trading days  
+**Training data start:** `{cfg["start_date"]}`  
 **Selected features:** {", ".join(cfg["selected_features"]) if cfg["selected_features"] else "None"}
 """
 )
@@ -189,6 +189,20 @@ if "lstm_lab_result" not in st.session_state:
         st.session_state["lstm_lab_result"] = latest
 
 result = st.session_state.get("lstm_lab_result")
+
+runs_df = get_prediction_runs_df()
+
+with st.expander("Stored LSTM prediction runs (Postgres)", expanded=False):
+    if runs_df.empty:
+        st.info("No prediction runs stored in Postgres yet.")
+    else:
+        st.dataframe(runs_df, use_container_width=True, hide_index=True)
+        active_candidates = runs_df["run_id"].tolist()
+        selected_active = st.selectbox("Set active run for optimizer", active_candidates)
+        if st.button("Set selected run as active"):
+            set_active_prediction_run(selected_active)
+            st.success(f"Active prediction run set to: {selected_active}")
+            st.rerun()
 
 if result is None:
     st.warning("No LSTM Lab run available yet. Launch one from this page.")
@@ -306,7 +320,6 @@ with tab3:
         filtered = filtered[(filtered["rmse_test"].isna()) | (filtered["rmse_test"] <= max_rmse)]
 
     filtered = filtered.sort_values(["mu_pred", "dir_acc_test"], ascending=[False, False])
-
     st.dataframe(filtered, use_container_width=True, hide_index=True)
 
 with tab4:

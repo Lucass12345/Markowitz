@@ -1,3 +1,4 @@
+from src.optimization.lstm_lab_loader import load_active_lstm_predictions_df
 from pathlib import Path
 import numpy as np
 import pandas as pd
@@ -94,14 +95,14 @@ def build_model_inputs(
     # AI RETURNS - LSTM
     # =========================
     if model_type == "ai_returns_lstm":
-        preds = load_predictions("return_predictions_lstm.csv").set_index("ticker")
+        preds = load_active_lstm_predictions_df().set_index("ticker")
 
         if "mu_pred" not in preds.columns:
-            raise ValueError("return_predictions_lstm.csv debe contener columna 'mu_pred'")
+            raise ValueError("Active LSTM Lab predictions must contain column 'mu_pred'")
 
         common = [t for t in returns.columns if t in preds.index]
         if not common:
-            raise ValueError("No hay tickers en común entre returns.csv y return_predictions_lstm.csv")
+            raise ValueError("No active LSTM Lab predictions available for optimizer universe.")
 
         returns_sub = returns[common].copy()
         mu = preds.loc[common, "mu_pred"].astype(float)

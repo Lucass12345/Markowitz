@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -88,6 +87,7 @@ def build_selected_features():
 
     with st.sidebar:
         st.header("Configuration")
+
         st.subheader("Feature selection")
 
         with st.expander("Base features", expanded=True):
@@ -152,12 +152,11 @@ def build_selected_features():
 cfg = build_selected_features()
 
 st.info(
-    f"""\n**Universe:** all available tickers in returns dataset (`{len(ALL_TICKERS)}` assets)  
+    f"""**Universe:** all available tickers in returns dataset (`{len(ALL_TICKERS)}` assets)  
 **Target:** `{cfg["target_aggregation"]}` of next `{cfg["forecast_horizon"]}` trading-day returns  
 **Input window:** last `{cfg["seq_len"]}` trading days  
 **Training data start:** `{cfg["start_date"]}`  
-**Selected features:** {", ".join(cfg["selected_features"]) if cfg["selected_features"] else "None"}
-"""
+**Selected features:** {", ".join(cfg["selected_features"]) if cfg["selected_features"] else "None"}"""
 )
 
 run_button = st.button("Train and generate full-universe predictions", use_container_width=True)
@@ -257,10 +256,10 @@ with tab1:
 
     st.subheader("Artifacts")
     st.code(
-        f"Run ID: {result['run_id']}\n"
-        f"Predictions: {result['predictions_path']}\n"
-        f"Metrics: {result['metrics_path']}\n"
-        f"Per ticker predictions: {result['per_ticker_dir']}\n"
+        f"Run ID: {result['run_id']}\\n"
+        f"Predictions: {result['predictions_path']}\\n"
+        f"Metrics: {result['metrics_path']}\\n"
+        f"Per ticker predictions: {result['per_ticker_dir']}\\n"
         f"Loss curves: {result['curves_dir']}"
     )
 

@@ -15,6 +15,7 @@ from src.data.load_data import load_returns
 from src.models.return_model_lstm import ReturnLSTM
 from src.models.lstm_features import build_lstm_feature_frame, select_feature_columns
 from src.models.sequence_utils import build_lstm_sequences_multifeature
+from app.lstm_lab_storage import persist_lstm_lab_run
 
 ROOT = Path(__file__).resolve().parents[2]
 OUTPUT_ROOT = ROOT / "outputs" / "lstm_lab" / "runs"
@@ -381,18 +382,18 @@ def run_lstm_lab(
         "hidden_size": hidden_size,
         "num_layers": num_layers,
         "dropout": dropout,
+        "mean_mu_pred": float(predictions_df["mu_pred"].mean()) if not predictions_df.empty else None,
+        "min_mu_pred": float(predictions_df["mu_pred"].min()) if not predictions_df.empty else None,
+        "max_mu_pred": float(predictions_df["mu_pred"].max()) if not predictions_df.empty else None,
+        "mean_rmse_test": float(pd.to_numeric(metrics_df["rmse_test"], errors="coerce").mean()) if "rmse_test" in metrics_df.columns else None,
+        "mean_dir_acc_test": float(pd.to_numeric(metrics_df["dir_acc_test"], errors="coerce").mean()) if "dir_acc_test" in metrics_df.columns else None,
     }
 
     with open(run_output_dir / "config.json", "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2)
 
     with open(run_output_dir / "summary.json", "w", encoding="utf-8") as f:
-        json.dump({
-            **summary,
-            "mean_mu_pred": float(predictions_df["mu_pred"].mean()) if not predictions_df.empty else None,
-            "min_mu_pred": float(predictions_df["mu_pred"].min()) if not predictions_df.empty else None,
-            "max_mu_pred": float(predictions_df["mu_pred"].max()) if not predictions_df.empty else None,
-        }, f, indent=2)
+        json.dump(summary, f, indent=2)
 
     latest_ptr = ROOT / "outputs" / "lstm_lab" / "latest_run.json"
     latest_ptr.parent.mkdir(parents=True, exist_ok=True)
@@ -402,8 +403,18 @@ def run_lstm_lab(
         "run_model_dir": str(run_model_dir),
     }, indent=2), encoding="utf-8")
 
+    db_run_pk = persist_lstm_lab_run(
+        run_id=run_id,
+        summary=summary,
+        predictions_df=predictions_df,
+        metrics_df=metrics_df,
+        run_output_dir=str(run_output_dir),
+        run_model_dir=str(run_model_dir),
+    )
+
     return {
         "run_id": run_id,
+        "db_run_pk": db_run_pk,
         "predictions_path": str(run_output_dir / "predictions.csv"),
         "metrics_path": str(run_output_dir / "metrics.csv"),
         "per_ticker_dir": str(per_ticker_dir),
