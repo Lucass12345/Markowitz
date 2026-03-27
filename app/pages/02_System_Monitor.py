@@ -12,9 +12,15 @@ st.set_page_config(
     layout="wide",
 )
 
-API_BASE_URL = os.getenv("API_BASE_URL", "http://127.0.0.1:8000")
-MLFLOW_UI_URL = os.getenv("MLFLOW_UI_URL", "http://127.0.0.1:5005")
-MINIO_CONSOLE_URL = os.getenv("MINIO_CONSOLE_URL", "http://127.0.0.1:9001")
+# URLs para mostrar en el navegador del usuario
+API_BROWSER_URL = os.getenv("API_BASE_URL", "http://127.0.0.1:8000")
+MLFLOW_BROWSER_URL = os.getenv("MLFLOW_UI_URL", "http://127.0.0.1:5005")
+MINIO_BROWSER_URL = os.getenv("MINIO_CONSOLE_URL", "http://127.0.0.1:9001")
+
+# URLs internas entre containers
+API_INTERNAL_URL = os.getenv("API_INTERNAL_URL", "http://fastapi:8000")
+MLFLOW_INTERNAL_URL = os.getenv("MLFLOW_INTERNAL_URL", "http://mlflow:5000")
+MINIO_INTERNAL_URL = os.getenv("MINIO_INTERNAL_URL", "http://minio:9001")
 
 
 def render_metric_card(label: str, value: str, color: str = "#1e293b") -> None:
@@ -45,22 +51,32 @@ def safe_get_json(url: str, timeout: int = 15) -> tuple[bool, Any]:
         return False, str(exc)
 
 
+def safe_get_status(url: str, timeout: int = 10) -> tuple[bool, int | None, str | None]:
+    try:
+        response = requests.get(url, timeout=timeout)
+        return True, response.status_code, None
+    except Exception as exc:
+        return False, None, str(exc)
+
+
 st.title("System Monitor")
 st.caption("Operational status of the portfolio optimization platform.")
 
 col_cfg1, col_cfg2, col_cfg3 = st.columns(3)
 with col_cfg1:
-    api_base_url = st.text_input("API base URL", value=API_BASE_URL)
+    api_browser_url = st.text_input("API browser URL", value=API_BROWSER_URL)
 with col_cfg2:
-    mlflow_ui_url = st.text_input("MLflow UI URL", value=MLFLOW_UI_URL)
+    mlflow_browser_url = st.text_input("MLflow browser URL", value=MLFLOW_BROWSER_URL)
 with col_cfg3:
-    minio_console_url = st.text_input("MinIO Console URL", value=MINIO_CONSOLE_URL)
+    minio_browser_url = st.text_input("MinIO browser URL", value=MINIO_BROWSER_URL)
 
 st.markdown("---")
 
-# API Health
-api_ok, api_result = safe_get_json(f"{api_base_url}/health")
-runs_ok, runs_result = safe_get_json(f"{api_base_url}/runs?limit=5")
+# Health checks internos entre containers
+api_ok, api_result = safe_get_json(f"{API_INTERNAL_URL}/health")
+runs_ok, runs_result = safe_get_json(f"{API_INTERNAL_URL}/runs?limit=5")
+mlflow_ok, mlflow_status, mlflow_error = safe_get_status(MLFLOW_INTERNAL_URL)
+minio_ok, minio_status, minio_error = safe_get_status(MINIO_INTERNAL_URL)
 
 top1, top2, top3 = st.columns(3)
 
@@ -78,41 +94,39 @@ with top2:
 
 with top3:
     if runs_ok and isinstance(runs_result, list) and len(runs_result) > 0:
-        render_metric_card("Latest Run ID", str(runs_result[0]["id"]), "#7c3aed")
+        latest_id = runs_result[0].get("id", "N/A")
+        render_metric_card("Latest Run ID", str(latest_id), "#7c3aed")
     else:
         render_metric_card("Latest Run ID", "N/A", "#7f1d1d")
 
 st.subheader("Service Status")
 
 svc1, svc2, svc3 = st.columns(3)
+
 with svc1:
-    st.markdown(f"**FastAPI docs:** [Open]({api_base_url}/docs)")
+    st.markdown(f"**FastAPI docs:** [Open]({api_browser_url}/docs)")
     if api_ok:
         st.success("API responding correctly")
     else:
         st.error(f"API error: {api_result}")
 
 with svc2:
-    st.markdown(f"**MLflow UI:** [Open]({mlflow_ui_url})")
-    try:
-        mlflow_resp = requests.get(mlflow_ui_url, timeout=10)
-        if mlflow_resp.status_code == 200:
-            st.success("MLflow UI reachable")
-        else:
-            st.warning(f"MLflow returned status {mlflow_resp.status_code}")
-    except Exception as exc:
-        st.error(f"MLflow error: {exc}")
+    st.markdown(f"**MLflow UI:** [Open]({mlflow_browser_url})")
+    if mlflow_ok and mlflow_status == 200:
+        st.success("MLflow UI reachable")
+    elif mlflow_ok:
+        st.warning(f"MLflow returned status {mlflow_status}")
+    else:
+        st.error(f"MLflow error: {mlflow_error}")
 
 with svc3:
-    st.markdown(f"**MinIO Console:** [Open]({minio_console_url})")
-    try:
-        minio_resp = requests.get(minio_console_url, timeout=10)
-        if minio_resp.status_code == 200:
-            st.success("MinIO Console reachable")
-        else:
-            st.warning(f"MinIO returned status {minio_resp.status_code}")
-    except Exception as exc:
-        st.error(f"MinIO error: {exc}")
+    st.markdown(f"**MinIO Console:** [Open]({minio_browser_url})")
+    if minio_ok and minio_status == 200:
+        st.success("MinIO Console reachable")
+    elif minio_ok:
+        st.warning(f"MinIO returned status {minio_status}")
+    else:
+        st.error(f"MinIO error: {minio_error}")
 
 st.markdown("---")
 
@@ -128,9 +142,12 @@ st.markdown("---")
 with st.expander("Environment Summary"):
     st.json(
         {
-            "API_BASE_URL": api_base_url,
-            "MLFLOW_UI_URL": mlflow_ui_url,
-            "MINIO_CONSOLE_URL": minio_console_url,
+            "API_BROWSER_URL": api_browser_url,
+            "MLFLOW_BROWSER_URL": mlflow_browser_url,
+            "MINIO_BROWSER_URL": minio_browser_url,
+            "API_INTERNAL_URL": API_INTERNAL_URL,
+            "MLFLOW_INTERNAL_URL": MLFLOW_INTERNAL_URL,
+            "MINIO_INTERNAL_URL": MINIO_INTERNAL_URL,
         },
         expanded=True,
     )
