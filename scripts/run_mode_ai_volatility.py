@@ -15,7 +15,7 @@ if __name__ == "__main__":
         rf_annual_simple=DEFAULT_CONFIG.risk_free_annual_simple,
     )
 
-    print("\n=== AI VOLATILITY ===")
+    print("\n=== AI VOLATILITY (GJR-GARCH) ===")
     print("MinVar:", result["minvar"]["stats"])
     print("MaxSharpe:", result["maxsharpe"]["stats"])
     print("Blocks:", result["blocks"]["stats"])

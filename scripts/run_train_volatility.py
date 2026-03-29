@@ -8,7 +8,10 @@ from src.models.train_volatility import forecast_all_volatility
 
 
 if __name__ == "__main__":
+    df = forecast_all_volatility(
+        start_date="2022-01-01",
+        min_obs=252,
+    )
 
-    forecast_all_volatility()
-
-    print("\nVolatility predictions generated")
+    print("\nVolatility predictions generated successfully.")
+    print(f"Rows: {len(df)}")
