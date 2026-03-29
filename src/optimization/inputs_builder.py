@@ -92,21 +92,46 @@ def build_model_inputs(
         return mu, cov, common
 
     # =========================
-    # AI RETURNS - LSTM
+    # AI RETURNS - LSTM (HÍBRIDO)
+    # buenos -> mu_pred
+    # resto  -> media histórica
     # =========================
     if model_type == "ai_returns_lstm":
-        preds = load_active_lstm_predictions_df().set_index("ticker")
+        preds = load_active_lstm_predictions_df().copy()
+        preds["ticker"] = preds["ticker"].astype(str).str.strip()
+        preds = preds.set_index("ticker")
 
         if "mu_pred" not in preds.columns:
             raise ValueError("Active LSTM Lab predictions must contain column 'mu_pred'")
+
+        if "dir_acc_test" not in preds.columns:
+            raise ValueError("Active LSTM Lab predictions must contain column 'dir_acc_test'")
 
         common = [t for t in returns.columns if t in preds.index]
         if not common:
             raise ValueError("No active LSTM Lab predictions available for optimizer universe.")
 
         returns_sub = returns[common].copy()
-        mu = preds.loc[common, "mu_pred"].astype(float)
+        preds = preds.loc[common].copy()
+
+        # media histórica para TODO el universo común
+        hist_mu = returns_sub.mean()
+
+        # arranco con histórico para todos
+        mu = hist_mu.copy()
+
+        # filtro de activos "buenos"
+        good_mask = preds["dir_acc_test"].astype(float) > 0.52
+
+        # a los buenos les reemplazo el retorno histórico por mu_pred del LSTM
+        mu.loc[good_mask.index[good_mask]] = preds.loc[good_mask, "mu_pred"].astype(float)
+
+        # cov siempre histórica sobre el universo completo
         cov = returns_sub.cov()
+
+        # asegurar alineación exacta
+        mu = mu.loc[common]
+        cov = cov.loc[common, common]
 
         return mu, cov, common
 
