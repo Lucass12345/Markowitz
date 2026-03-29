@@ -36,14 +36,15 @@ MODE_LABELS = {
     "classic": "Classic Markowitz",
     "ai_returns": "AI Returns (MLP)",
     "ai_returns_lstm": "AI Returns (LSTM)",
-    "ai_volatility": "AI Volatility (GJR-GJR-GARCH)",
+    "ai_volatility": "AI Volatility (GJR-GARCH)",
 }
 MODE_HELP = {
     "classic": "Historical mean returns + historical covariance.",
     "ai_returns": "Predicted expected returns from MLP + historical covariance.",
     "ai_returns_lstm": "Predicted expected returns from LSTM + historical covariance.",
-    "ai_volatility": "Historical expected returns + covariance rescaled using predicted volatility from post-2022 GJR-GJR-GARCH (Student-t), with EWMA fallback if convergence fails.",
+    "ai_volatility": "Historical expected returns + covariance rescaled using predicted volatility from outputs/predictions/volatility_predictions.csv generated from Data/returns.csv.",
 }
+
 
 API_BASE_URL = os.getenv("API_BASE_URL", "http://127.0.0.1:8000")
 
