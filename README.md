@@ -161,18 +161,18 @@ Archivos principales:
 ### Capa 2 — Modelos predictivos
 Modelos disponibles:
 
-- **MLP legado** para retornos
-- **LSTM legado** para retornos
+- **MLP** para retornos
+- **LSTM** para retornos
 - **LSTM Lab** para corridas experimentales versionadas
 - **MLP Lab** para corridas experimentales versionadas
 - **GJR-GARCH / EWMA fallback** para volatilidad
 
 ### Capa 3 — Ensamblado de inputs
-Archivo clave:
+Archivo:
 
 - `src/optimization/inputs_builder.py`
 
-Es el punto más importante del repo porque decide qué señales se usan según el modo seleccionado.
+Decide qué señales se usan según el modo seleccionado.
 
 ### Capa 4 — Optimización
 Archivos principales:
@@ -197,7 +197,7 @@ Archivos y servicios principales:
 La lógica actual está en `src/optimization/inputs_builder.py`.
 
 ### 5.1 `classic`
-Usa solamente historia.
+Uso exclusivo de datos historicos.
 
 **Input:**
 - `mu = returns.mean()`
@@ -206,11 +206,11 @@ Usa solamente historia.
 **Fuente:**
 - `Data/returns.csv`
 
-**Interpretación:** benchmark puro.
+**Interpretación:** benchmark y teoria financiera pura.
 
 ---
 
-### 5.2 `ai_returns`
+### 5.2 `ai_returns` - (Descontinuado por mejor desempeño de LSTM)
 Primero intenta consumir el **run activo de MLP Lab**. Si no hay run activo o la carga falla, hace fallback a `outputs/predictions/predictions.csv`.
 
 **Prioridad actual:**
@@ -259,7 +259,7 @@ Consume directamente:
 
 ---
 
-## 6. Dónde se guarda cada cosa
+## 6. Almacenamiento de datos
 
 ### 6.1 Datos base
 - `Data/prices.csv`
@@ -274,10 +274,10 @@ Consume directamente:
 - `outputs/predictions/predictions.csv`
 
 ### 6.3 Modelos entrenados
-#### MLP legado
+#### MLP
 - `models_artifacts/returns/*.joblib`
 
-#### LSTM legado
+#### LSTM
 - `models_artifacts/returns_lstm/*.pt`
 - `models_artifacts/returns_lstm/*_meta.json`
 
@@ -313,7 +313,7 @@ Si no se define `DATABASE_URL`, el sistema usa:
 
 ---
 
-## 7. Servicios del sistema: para qué sirve cada uno
+## 7. Servicios del sistema
 
 ### 7.1 Streamlit
 **Archivo principal:** `app/Optimizador_Markowitz.py`
@@ -670,7 +670,7 @@ El optimizador tomará el run activo y solo aplicará `mu_pred` a activos con ca
 
 ---
 
-## 15.5 Flujo para `ai_returns` con MLP
+## 15.5 Flujo para `ai_returns` con MLP - (Descontinuado)
 
 Hoy existen dos caminos.
 
@@ -701,7 +701,7 @@ C:\Users\lucas\anaconda3\envs\IIA_cuda_env\python.exe scripts\run_predict_all.py
 ## 16. Parámetros y estados de los modelos
 
 ## 16.1 Markowitz clásico
-No hay un modelo serializado. El input se calcula al vuelo desde `returns.csv`.
+No hay un modelo serializado. El input se calcula desde `returns.csv`.
 
 ## 16.2 MLP legado de retornos
 Ubicación:
@@ -737,7 +737,7 @@ Ubicación de runs:
 Último run identificado en esta snapshot:
 - `20260329_012341`
 
-## 16.5 MLP Lab
+## 16.5 MLP Lab - (Descontinuado)
 Ubicación de runs:
 - `outputs/mlp_lab/runs/<run_id>/`
 - `models_artifacts/returns_mlp_lab/runs/<run_id>/`
@@ -784,7 +784,7 @@ Tablas principales:
 - `prediction_runs`
 - `prediction_run_tickers`
 
-### 17.3 Corridas de MLP Lab
+### 17.3 Corridas de MLP Lab - (Descontinuado)
 Tablas principales:
 - `mlp_prediction_runs`
 - `mlp_prediction_run_tickers`
@@ -819,32 +819,12 @@ El laboratorio LSTM además puede:
 - loguear parámetros y métricas a MLflow;
 - subir outputs y modelos a MinIO.
 
-## 18.3 MLP Lab
+## 18.3 MLP Lab - (Descontinuado)
 En la versión actual, el MLP Lab persiste en DB y en carpetas locales del repo, pero no tiene integración equivalente a la del LSTM Lab con MinIO/MLflow tan desarrollada.
 
 ---
 
-## 19. Recomendación operativa actual
-
-### Estable / recomendable
-- `classic`
-- `ai_volatility` con `volatility_predictions.csv`
-- `ai_returns_lstm` si el run activo fue validado bien
-
-### Experimental / en revisión
-- `ai_returns` vía MLP Lab
-
-### Observación metodológica
-El enfoque más sólido hoy para el repo es:
-
-- benchmark clásico;
-- comparación contra `ai_volatility`;
-- comparación contra `ai_returns_lstm` filtrado;
-- dejar `MLP Lab` como línea experimental secundaria.
-
----
-
-## 20. Archivos clave que conviene conocer de memoria
+## 19. Archivos clave que conviene conocer de memoria
 
 ### Frontend / UX
 - `app/Optimizador_Markowitz.py`
@@ -883,7 +863,7 @@ El enfoque más sólido hoy para el repo es:
 
 ---
 
-## 21. Troubleshooting rápido
+## 20. Troubleshooting rápido
 
 ### “No hay un run activo de MLP Lab”
 - entrenar un run en MLP Lab;
@@ -911,12 +891,12 @@ El enfoque más sólido hoy para el repo es:
 
 ---
 
-## 22. Disclaimer
+## 21. Disclaimer
 
 Este sistema es únicamente informativo, experimental y educativo. **No constituye una recomendación de inversión ni asesoramiento financiero.**
 
 ---
 
-## 23. Resumen final en una frase
+## 22. Resumen final en una frase
 
 **Optimizador Markowitz** es una plataforma de portfolio optimization con restricciones por bloques, donde Streamlit orquesta la experiencia de usuario, FastAPI ejecuta la lógica, PostgreSQL/SQLite persisten corridas, MLflow y MinIO trazan artefactos, y los modos `classic`, `ai_returns`, `ai_returns_lstm` y `ai_volatility` permiten comparar benchmark histórico contra inputs enriquecidos por modelos predictivos.
