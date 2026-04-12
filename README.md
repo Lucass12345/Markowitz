@@ -897,6 +897,6 @@ Este sistema es únicamente informativo, experimental y educativo. **No constitu
 
 ---
 
-## 22. Resumen final en una frase
+## 22. Resumen final
 
 **Optimizador Markowitz** es una plataforma de portfolio optimization con restricciones por bloques, donde Streamlit orquesta la experiencia de usuario, FastAPI ejecuta la lógica, PostgreSQL/SQLite persisten corridas, MLflow y MinIO trazan artefactos, y los modos `classic`, `ai_returns`, `ai_returns_lstm` y `ai_volatility` permiten comparar benchmark histórico contra inputs enriquecidos por modelos predictivos.
