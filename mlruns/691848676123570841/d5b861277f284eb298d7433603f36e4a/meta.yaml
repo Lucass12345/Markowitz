@@ -1,0 +1,15 @@
+artifact_uri: file:///C:/Users/lucas/OneDrive/Documentos/GitHub/Markowitz/mlruns/691848676123570841/d5b861277f284eb298d7433603f36e4a/artifacts
+end_time: 1773269592149
+entry_point_name: ''
+experiment_id: '691848676123570841'
+lifecycle_stage: active
+run_id: d5b861277f284eb298d7433603f36e4a
+run_name: ai_volatility_streamlit_run
+run_uuid: d5b861277f284eb298d7433603f36e4a
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1773269591700
+status: 3
+tags: []
+user_id: lucas

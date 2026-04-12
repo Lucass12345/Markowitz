@@ -1,0 +1,18 @@
+{
+  "ticker": "PAMP.BA",
+  "seq_len": 20,
+  "forecast_horizon": 5,
+  "hidden_size": 64,
+  "num_layers": 2,
+  "dropout": 0.2,
+  "metrics": {
+    "mse_test": 0.0052096047438681126,
+    "rmse_test": 0.07217758893966675,
+    "mae_test": 0.052607204765081406,
+    "best_val_loss": 0.004414843861013651,
+    "train_size": 1425,
+    "val_size": 306,
+    "test_size": 306,
+    "epochs_trained": 31
+  }
+}

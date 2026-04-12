@@ -1,0 +1,32 @@
+{
+  "start_date": "2022-01-01",
+  "forecast_horizon": 1,
+  "target_aggregation": "mean",
+  "lags": 20,
+  "short_window": 5,
+  "long_window": 20,
+  "hidden_layers": [
+    256,
+    128,
+    64
+  ],
+  "activation": "relu",
+  "solver": "adam",
+  "scaler": "standard",
+  "alpha": 0.0001,
+  "learning_rate": "adaptive",
+  "learning_rate_init": 0.001,
+  "max_iter": 500,
+  "batch_size": "auto",
+  "early_stopping": true,
+  "validation_fraction": 0.15,
+  "n_iter_no_change": 20,
+  "clip_pred": 0.02,
+  "winsorize_quantile": 0.01,
+  "include_abs_features": true,
+  "include_square_features": true,
+  "include_sign_features": true,
+  "selection_policy": {
+    "policy_type": "all_assets"
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "ticker": "AMZN",
+  "seq_len": 20,
+  "forecast_horizon": 5,
+  "hidden_size": 64,
+  "num_layers": 2,
+  "dropout": 0.2,
+  "metrics": {
+    "mse_test": 0.0018166914815083146,
+    "rmse_test": 0.04262266308069229,
+    "mae_test": 0.032763298600912094,
+    "best_val_loss": 0.001439390005543828,
+    "train_size": 1425,
+    "val_size": 306,
+    "test_size": 306,
+    "epochs_trained": 67
+  }
+}

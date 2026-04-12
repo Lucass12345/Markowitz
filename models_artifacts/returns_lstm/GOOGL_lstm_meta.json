@@ -1,0 +1,18 @@
+{
+  "ticker": "GOOGL",
+  "seq_len": 20,
+  "forecast_horizon": 5,
+  "hidden_size": 64,
+  "num_layers": 2,
+  "dropout": 0.2,
+  "metrics": {
+    "mse_test": 0.0021199514158070087,
+    "rmse_test": 0.04604293033480644,
+    "mae_test": 0.0362497977912426,
+    "best_val_loss": 0.0013970471918582916,
+    "train_size": 1425,
+    "val_size": 306,
+    "test_size": 306,
+    "epochs_trained": 11
+  }
+}

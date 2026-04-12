@@ -1,0 +1,18 @@
+{
+  "ticker": "CEPU.BA",
+  "seq_len": 20,
+  "forecast_horizon": 5,
+  "hidden_size": 64,
+  "num_layers": 2,
+  "dropout": 0.2,
+  "metrics": {
+    "mse_test": 0.009463207796216011,
+    "rmse_test": 0.09727901965379715,
+    "mae_test": 0.07026345282793045,
+    "best_val_loss": 0.007128187455236912,
+    "train_size": 1425,
+    "val_size": 306,
+    "test_size": 306,
+    "epochs_trained": 14
+  }
+}

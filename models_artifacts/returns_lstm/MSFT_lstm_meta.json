@@ -1,0 +1,18 @@
+{
+  "ticker": "MSFT",
+  "seq_len": 20,
+  "forecast_horizon": 5,
+  "hidden_size": 64,
+  "num_layers": 2,
+  "dropout": 0.2,
+  "metrics": {
+    "mse_test": 0.000978730502538383,
+    "rmse_test": 0.03128466755151749,
+    "mae_test": 0.023333512246608734,
+    "best_val_loss": 0.0006756362272426486,
+    "train_size": 1425,
+    "val_size": 306,
+    "test_size": 306,
+    "epochs_trained": 12
+  }
+}

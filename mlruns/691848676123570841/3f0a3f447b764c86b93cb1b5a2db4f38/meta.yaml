@@ -1,0 +1,15 @@
+artifact_uri: file:///C:/Users/lucas/OneDrive/Documentos/GitHub/Markowitz/mlruns/691848676123570841/3f0a3f447b764c86b93cb1b5a2db4f38/artifacts
+end_time: 1773194922114
+entry_point_name: ''
+experiment_id: '691848676123570841'
+lifecycle_stage: active
+run_id: 3f0a3f447b764c86b93cb1b5a2db4f38
+run_name: classic_streamlit_run
+run_uuid: 3f0a3f447b764c86b93cb1b5a2db4f38
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1773194921659
+status: 3
+tags: []
+user_id: lucas

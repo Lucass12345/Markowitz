@@ -1,0 +1,18 @@
+{
+  "ticker": "YPFD.BA",
+  "seq_len": 20,
+  "forecast_horizon": 5,
+  "hidden_size": 64,
+  "num_layers": 2,
+  "dropout": 0.2,
+  "metrics": {
+    "mse_test": 0.007080920971930027,
+    "rmse_test": 0.08414820581674576,
+    "mae_test": 0.06205209717154503,
+    "best_val_loss": 0.007822111248970032,
+    "train_size": 1425,
+    "val_size": 306,
+    "test_size": 306,
+    "epochs_trained": 20
+  }
+}
