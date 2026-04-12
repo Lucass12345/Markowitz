@@ -1,4 +1,4 @@
-# Optimizador Markowitz — README operativo integral
+# Optimizador Markowitz
 
 ## 1. Resumen ejecutivo
 
