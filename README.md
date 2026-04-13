@@ -416,10 +416,10 @@ Archivo real:
 Variables clave:
 
 ```env
-POSTGRES_DB=markowitz
+POSTGRES_SERVER=postgres
 POSTGRES_USER=markowitz_user
 POSTGRES_PASSWORD=markowitz_pass
-POSTGRES_PORT=5432
+POSTGRES_DB=markowitz
 
 DATABASE_URL=postgresql+psycopg2://markowitz_user:markowitz_pass@postgres:5432/markowitz
 
