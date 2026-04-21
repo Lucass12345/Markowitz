@@ -1,3 +1,4 @@
+import argparse
 import json
 from pathlib import Path
 
@@ -5,6 +6,7 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNS_DIR = ROOT / "outputs" / "lstm_lab" / "runs"
+LATEST_PTR = ROOT / "outputs" / "lstm_lab" / "latest_run.json"
 
 
 def _compute_amp_row(csv_path: Path) -> dict | None:
@@ -61,9 +63,37 @@ def _update_run(run_dir: Path) -> None:
     print(f"[ok] {run_dir.name}: metrics.csv actualizado con amp_ratio.")
 
 
+def _resolve_run_dirs(run_id: str | None, all_runs: bool) -> list[Path]:
+    if all_runs:
+        return [d for d in sorted(RUNS_DIR.glob("*")) if d.is_dir()]
+
+    if run_id:
+        only = RUNS_DIR / run_id
+        if not only.exists():
+            raise FileNotFoundError(f"No existe corrida {run_id} en {RUNS_DIR}")
+        return [only]
+
+    if LATEST_PTR.exists():
+        latest = json.loads(LATEST_PTR.read_text())
+        latest_id = str(latest.get("run_id", "")).strip()
+        if latest_id:
+            only = RUNS_DIR / latest_id
+            if only.exists():
+                return [only]
+
+    raise FileNotFoundError(
+        "No pude resolver la corrida objetivo. Usá --run-id <RUN_ID> o --all."
+    )
+
+
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Backfill de amp_ratio para corridas LSTM.")
+    parser.add_argument("--run-id", type=str, default=None, help="Run ID específico a actualizar.")
+    parser.add_argument("--all", action="store_true", help="Actualizar todas las corridas en outputs/lstm_lab/runs.")
+    args = parser.parse_args()
+
     if not RUNS_DIR.exists():
         raise FileNotFoundError(f"No existe {RUNS_DIR}")
-    for run_dir in sorted(RUNS_DIR.glob("*")):
-        if run_dir.is_dir():
-            _update_run(run_dir)
+
+    for run_dir in _resolve_run_dirs(run_id=args.run_id, all_runs=args.all):
+        _update_run(run_dir)
