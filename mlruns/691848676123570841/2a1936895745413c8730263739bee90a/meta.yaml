@@ -1,0 +1,15 @@
+artifact_uri: file:///C:/Users/lucas/OneDrive/Documentos/GitHub/Markowitz/mlruns/691848676123570841/2a1936895745413c8730263739bee90a/artifacts
+end_time: 1776727578621
+entry_point_name: ''
+experiment_id: '691848676123570841'
+lifecycle_stage: active
+run_id: 2a1936895745413c8730263739bee90a
+run_name: lstm_lab_20260420_231858
+run_uuid: 2a1936895745413c8730263739bee90a
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1776727576063
+status: 3
+tags: []
+user_id: root

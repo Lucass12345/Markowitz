@@ -1,0 +1,29 @@
+{
+  "run_id": "20260420_231858",
+  "total_tickers_in_universe": 40,
+  "tickers_with_predictions": 40,
+  "start_date": "2022-01-01",
+  "selected_features": [
+    "return",
+    "lag_1",
+    "lag_2",
+    "rolling_mean_5",
+    "rolling_std_5",
+    "rolling_mean_20",
+    "rolling_std_20"
+  ],
+  "seq_len": 40,
+  "forecast_horizon": 5,
+  "target_aggregation": "mean",
+  "epochs": 50,
+  "batch_size": 32,
+  "lr": 0.001,
+  "hidden_size": 96,
+  "num_layers": 2,
+  "dropout": 0.1,
+  "mean_mu_pred": 0.0005493392429343658,
+  "min_mu_pred": -0.007148257922381163,
+  "max_mu_pred": 0.0048240963369607925,
+  "mean_rmse_test": 0.00987428724674183,
+  "mean_dir_acc_test": 0.5268835616438357
+}
