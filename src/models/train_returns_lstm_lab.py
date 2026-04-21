@@ -56,6 +56,18 @@ def corrcoef_safe(y_true, y_pred):
     return float(np.corrcoef(y_true, y_pred)[0, 1])
 
 
+def amplitude_ratio(y_true, y_pred):
+    y_true = np.asarray(y_true, dtype=float)
+    y_pred = np.asarray(y_pred, dtype=float)
+    if len(y_true) < 2 or len(y_pred) < 2:
+        return np.nan
+    std_y_true = float(np.std(y_true, ddof=1))
+    std_y_pred = float(np.std(y_pred, ddof=1))
+    if not np.isfinite(std_y_true) or std_y_true <= 0:
+        return np.nan
+    return float(std_y_pred / std_y_true)
+
+
 def temporal_split(X, y, dates, train_frac=0.70, val_frac=0.15):
     n = len(X)
     train_end = int(n * train_frac)
@@ -279,6 +291,9 @@ def run_lstm_lab(
                 "rmse_test": rmse(y_test, pred_test),
                 "dir_acc_test": directional_accuracy(y_test, pred_test),
                 "corr_test": corrcoef_safe(y_test, pred_test),
+                "std_y_true_test": float(np.std(y_test, ddof=1)) if len(y_test) >= 2 else np.nan,
+                "std_y_pred_test": float(np.std(pred_test, ddof=1)) if len(pred_test) >= 2 else np.nan,
+                "amp_ratio": amplitude_ratio(y_test, pred_test),
             }
 
             pred_rows.append({
@@ -386,6 +401,8 @@ def run_lstm_lab(
         "max_mu_pred": float(predictions_df["mu_pred"].max()) if not predictions_df.empty else None,
         "mean_rmse_test": float(pd.to_numeric(metrics_df["rmse_test"], errors="coerce").mean()) if "rmse_test" in metrics_df.columns else None,
         "mean_dir_acc_test": float(pd.to_numeric(metrics_df["dir_acc_test"], errors="coerce").mean()) if "dir_acc_test" in metrics_df.columns else None,
+        "mean_amp_ratio_test": float(pd.to_numeric(metrics_df["amp_ratio"], errors="coerce").mean()) if "amp_ratio" in metrics_df.columns else None,
+        "share_amp_ratio_gt_015": float((pd.to_numeric(metrics_df["amp_ratio"], errors="coerce") > 0.15).mean()) if "amp_ratio" in metrics_df.columns else None,
     }
 
     with open(run_output_dir / "config.json", "w", encoding="utf-8") as f:
