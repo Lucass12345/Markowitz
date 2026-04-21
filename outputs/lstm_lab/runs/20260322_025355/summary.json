@@ -25,5 +25,7 @@
   "min_mu_pred": -0.005095729138702154,
   "max_mu_pred": 0.0062185931019485,
   "mean_rmse_test": 0.009852437767728052,
-  "mean_dir_acc_test": 0.49674657534246575
+  "mean_dir_acc_test": 0.49674657534246575,
+  "mean_amp_ratio_test": 0.1916821614847996,
+  "share_amp_ratio_gt_015": 0.45
 }
