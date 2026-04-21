@@ -9,6 +9,8 @@ from src.optimization.mlp_lab_loader import load_active_mlp_predictions
 
 ROOT = Path(__file__).resolve().parents[2]
 PRED_DIR = ROOT / "outputs" / "predictions"
+LSTM_DIR_ACC_MIN = 0.52
+LSTM_AMP_RATIO_MIN = 0.15
 
 
 def _read_prediction_csv(filename: str) -> pd.DataFrame:
@@ -102,6 +104,8 @@ def build_model_inputs(model_type: str, returns: pd.DataFrame):
             raise ValueError("Active LSTM Lab predictions must contain column 'mu_pred'")
         if "dir_acc_test" not in preds.columns:
             raise ValueError("Active LSTM Lab predictions must contain column 'dir_acc_test'")
+        if "amp_ratio" not in preds.columns:
+            raise ValueError("Active LSTM Lab predictions must contain column 'amp_ratio'")
         common = [t for t in returns.columns if t in preds.index]
         if not common:
             raise ValueError("No active LSTM Lab predictions available for optimizer universe.")
@@ -109,7 +113,10 @@ def build_model_inputs(model_type: str, returns: pd.DataFrame):
         preds = preds.loc[common].copy()
         hist_mu = returns_sub.mean()
         mu = hist_mu.copy()
-        good_mask = preds["dir_acc_test"].astype(float) > 0.52
+        good_mask = (
+            (preds["dir_acc_test"].astype(float) > LSTM_DIR_ACC_MIN)
+            & (preds["amp_ratio"].astype(float) > LSTM_AMP_RATIO_MIN)
+        )
         mu.loc[good_mask.index[good_mask]] = preds.loc[good_mask, "mu_pred"].astype(float)
         cov = returns_sub.cov()
         return mu.loc[common], cov.loc[common, common], common
