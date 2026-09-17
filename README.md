@@ -824,7 +824,7 @@ En la versión actual, el MLP Lab persiste en DB y en carpetas locales del repo,
 
 ---
 
-## 19. Archivos clave que conviene conocer de memoria
+## 19. Archivos fundamentales
 
 ### Frontend / UX
 - `app/Optimizador_Markowitz.py`
