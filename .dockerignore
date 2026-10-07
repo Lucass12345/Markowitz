@@ -1,0 +1,5 @@
+.git/
+notebooks/
+mlruns/
+**/__pycache__/
+*.pyc
