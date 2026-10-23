@@ -38,8 +38,9 @@ def build_candidate(args):
         vol.to_csv(candidate/'predictions'/'garch.csv',index=False)
         shutil.copytree(Path(trained['predictions_path']).parent,candidate/'lstm_run')
         shutil.copytree(Path(trained['model_dir']),candidate/'lstm_models')
+        from src.optimization.provenance import code_version
         (candidate/'candidate.json').write_text(json.dumps({'dataset_version':version,'lstm_run_id':trained['run_id'],
-            'base_currency':'USD','forecast_horizon':5,'publication_mode':'candidate'}))
+            'base_currency':'USD','code_commit':code_version()['commit'],'forecast_horizon':5,'publication_mode':'candidate'}))
         sealed=seal_candidate(candidate,min_signal_coverage=args.min_signal_coverage)
         if not args.candidate_only:
             activate_release(sealed.name)

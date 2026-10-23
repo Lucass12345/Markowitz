@@ -11,7 +11,7 @@ import sys
 import tempfile
 import zipfile
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-from src.publication.releases import import_release,activate_release
+from src.publication.releases import import_release,activate_release,verify_release
 
 
 def safe_unpack(archive,destination):
@@ -26,6 +26,17 @@ def safe_unpack(archive,destination):
         bundle.extractall(destination)
 
 
+
+def validate_source_run(run, repo):
+    workflow=str(run.get('path','')).split('@')[0]
+    owner=str((run.get('head_repository') or {}).get('full_name',''))
+    if (run.get('conclusion')!='success' or run.get('head_branch')!='main'
+            or run.get('event') not in {'schedule','workflow_dispatch'}
+            or owner.casefold()!=repo.casefold()
+            or workflow!='.github/workflows/yahoo-models.yml'
+            or not run.get('head_sha')):
+        raise ValueError('Require successful main schedule/dispatch from the repository Yahoo workflow')
+
 def main():
     parser=argparse.ArgumentParser()
     parser.add_argument('--run-id',type=int,required=True)
@@ -34,8 +45,7 @@ def main():
     parser.add_argument('--activate',action='store_true')
     args=parser.parse_args()
     run=json.loads(subprocess.check_output(['gh','api',f'repos/{args.repo}/actions/runs/{args.run_id}']))
-    if run.get('conclusion')!='success' or run.get('head_branch')!='main':
-        raise ValueError('Only successful main-branch workflow runs may be imported')
+    validate_source_run(run,args.repo)
     artifacts=json.loads(subprocess.check_output(['gh','api',f'repos/{args.repo}/actions/runs/{args.run_id}/artifacts']))['artifacts']
     matches=[a for a in artifacts if a['name']==f'yahoo-candidate-{args.run_id}' and not a['expired']]
     if len(matches)!=1:
@@ -48,6 +58,9 @@ def main():
         bundles=list((root/'unpacked').rglob('release.json'))
         if len(bundles)!=1:
             raise ValueError('Expected exactly one candidate bundle')
+        manifest=verify_release(bundles[0].parent)
+        if manifest.get('code_commit') != run['head_sha']:
+            raise ValueError('Candidate code commit differs from the trusted workflow run')
         installed=import_release(bundles[0].parent,args.data_dir)
         if args.activate:
             activate_release(installed.name,args.data_dir)

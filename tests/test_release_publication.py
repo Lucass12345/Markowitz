@@ -62,3 +62,56 @@ def test_archive_rejects_path_traversal(tmp_path):
         bundle.writestr('../escape','bad')
     with pytest.raises(ValueError,match='Unsafe'):
         safe_unpack(archive,tmp_path/'destination')
+
+
+def test_manifest_routing_and_quality_are_bound_to_hashed_candidate(tmp_path):
+    from src.publication.releases import verify_release
+    root=tmp_path/'runtime'
+    valid=seal_candidate(candidate(tmp_path/'build'),root,min_history=10)
+    manifest_path=valid/'release.json'
+    original=json.loads(manifest_path.read_text())
+    manifest_path.write_text(json.dumps({**original,'dataset_version':'../../outside'}))
+    with pytest.raises(ValueError,match='metadata'):
+        verify_release(valid)
+    with pytest.raises(ValueError):
+        activate_release(valid.name,root)
+    assert not (root/'active_release.json').exists()
+    manifest_path.write_text(json.dumps(original))
+    activate_release(valid.name,root)
+    original['gates']['min_history']=2
+    manifest_path.write_text(json.dumps(original))
+    with pytest.raises(ValueError,match='quality gates'):
+        verify_release(valid)
+
+
+def test_repeated_activation_preserves_previous_for_rollback(tmp_path):
+    root=tmp_path/'runtime'
+    first=seal_candidate(candidate(tmp_path/'build'),root,min_history=10)
+    second=seal_candidate(candidate(tmp_path/'build','v2'),root,min_history=10)
+    activate_release(first.name,root)
+    activate_release(second.name,root)
+    repeated=activate_release(second.name,root)
+    assert repeated['previous_release_id']==first.name
+    assert rollback(root)['release_id']==first.name
+
+
+@pytest.mark.parametrize('changes',[{'event':'pull_request'}, {'event':'push'},
+    {'head_repository':{'full_name':'attacker/Markowitz'}}, {'path':'.github/workflows/another.yml'},
+    {'head_branch':'feature'}, {'conclusion':'failure'}])
+def test_remote_pull_rejects_untrusted_workflow_identity(changes):
+    from scripts.pull_release import validate_source_run
+    run={'event':'schedule','head_repository':{'full_name':'Lucass12345/Markowitz'},
+         'path':'.github/workflows/yahoo-models.yml','head_branch':'main','conclusion':'success','head_sha':'abc'}
+    validate_source_run(run,'Lucass12345/Markowitz')
+    with pytest.raises(ValueError,match='workflow'):
+        validate_source_run({**run,**changes},'Lucass12345/Markowitz')
+
+
+def test_rollback_can_replace_a_corrupt_active_manifest(tmp_path):
+    root=tmp_path/'runtime'
+    first=seal_candidate(candidate(tmp_path/'build'),root,min_history=10)
+    second=seal_candidate(candidate(tmp_path/'build','v2'),root,min_history=10)
+    activate_release(first.name,root);activate_release(second.name,root)
+    path=second/'release.json';manifest=json.loads(path.read_text())
+    path.write_text(json.dumps({**manifest,'dataset_version':'corrupt'}))
+    assert rollback(root)['release_id']==first.name

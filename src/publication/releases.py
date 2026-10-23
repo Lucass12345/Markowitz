@@ -27,6 +27,9 @@ def active_release(data_dir=None):
         raise ValueError('Invalid release id')
     directory=root/'releases'/release_id
     manifest=json.loads((directory/'release.json').read_text())
+    _bound_metadata(directory, manifest)
+    if manifest['release_id'] != release_id:
+        raise ValueError('Active release ID does not match its manifest')
     return directory,manifest
 
 
@@ -75,7 +78,13 @@ def validate_candidate(directory,min_history=252,min_signal_coverage=.25):
 
 def seal_candidate(candidate,data_dir=None,**gate_config):
     candidate=Path(candidate)
-    gates=validate_candidate(candidate,**gate_config)
+    metadata=json.loads((candidate/'candidate.json').read_text())
+    if set(metadata) & {'release_id', 'sha256', 'gates'}:
+        raise ValueError('Candidate uses reserved manifest keys')
+    metadata['quality_gate'] = {'min_history': gate_config.get('min_history', 252),
+                                'min_signal_coverage': gate_config.get('min_signal_coverage', .25)}
+    (candidate/'candidate.json').write_bytes(json_bytes(metadata))
+    gates=validate_candidate(candidate,**metadata['quality_gate'])
     files={str(p.relative_to(candidate)):hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(candidate.rglob('*')) if p.is_file() and p.name!='release.json'}
     release_id=hashlib.sha256(json_bytes(files)).hexdigest()
     metadata=json.loads((candidate/'candidate.json').read_text())
@@ -92,11 +101,28 @@ def seal_candidate(candidate,data_dir=None,**gate_config):
     return destination
 
 
+
+def _bound_metadata(directory, manifest):
+    """Bind every routing/quality field to candidate.json in the content digest."""
+    content=(directory/'candidate.json').read_bytes()
+    candidate=json.loads(content)
+    version=candidate.get('dataset_version')
+    if not isinstance(version,str) or Path(version).name!=version or version in {'.','..'}:
+        raise ValueError('Invalid release dataset version')
+    if hashlib.sha256(json_bytes(manifest['sha256'])).hexdigest()!=manifest['release_id']:
+        raise ValueError('Release manifest integrity failed')
+    if hashlib.sha256(content).hexdigest()!=manifest['sha256'].get('candidate.json'):
+        raise ValueError('Candidate metadata integrity failed')
+    if any(manifest.get(key)!=value for key,value in candidate.items()) or set(manifest)!=set(candidate)|{'release_id','sha256','gates'}:
+        raise ValueError('Release metadata differs from its hashed candidate')
+    if not (directory/'data'/version).resolve().is_relative_to(directory.resolve()):
+        raise ValueError('Release dataset path escapes bundle')
+    return candidate
+
 def verify_release(directory):
     directory=Path(directory)
     manifest=json.loads((directory/'release.json').read_text())
-    if hashlib.sha256(json_bytes(manifest['sha256'])).hexdigest()!=manifest['release_id']:
-        raise ValueError('Release manifest integrity failed')
+    candidate=_bound_metadata(directory,manifest)
     actual={str(p.relative_to(directory)) for p in directory.rglob('*') if p.is_file() and p.name!='release.json'}
     if actual!=set(manifest['sha256']) or any(p.is_symlink() for p in directory.rglob('*')):
         raise ValueError('Release inventory or symbolic links invalid')
@@ -105,7 +131,9 @@ def verify_release(directory):
         if path.is_symlink() or not path.resolve().is_relative_to(directory.resolve()) or hashlib.sha256(path.read_bytes()).hexdigest()!=digest:
             raise ValueError(f'Release checksum/path invalid: {name}')
     # Re-run quality checks, never trust a claimed passed flag in a transported bundle.
-    validate_candidate(directory,min_history=manifest['gates']['min_history'],min_signal_coverage=manifest['gates']['min_signal_coverage'])
+    gates=validate_candidate(directory,**candidate['quality_gate'])
+    if gates != manifest['gates']:
+        raise ValueError('Release quality gates differ from recomputed results')
     return manifest
 
 
@@ -114,9 +142,14 @@ def activate_release(release_id,data_dir=None):
     if Path(release_id).name!=release_id:
         raise ValueError('Invalid release id')
     directory=root/'releases'/release_id
-    verify_release(directory)
-    old=active_release(root)
-    pointer={'release_id':release_id,'previous_release_id':old[1]['release_id'] if old else None}
+    manifest=verify_release(directory)
+    if manifest['release_id'] != release_id:
+        raise ValueError('Release ID does not match its directory')
+    pointer_path=root/'active_release.json'
+    old=json.loads(pointer_path.read_text()) if pointer_path.exists() else {}
+    if old.get('release_id') == release_id:
+        return old
+    pointer={'release_id':release_id,'previous_release_id':old.get('release_id')}
     temporary=root/f'.release_{uuid.uuid4().hex}.json'
     temporary.write_bytes(json_bytes(pointer))
     temporary.replace(root/'active_release.json')
