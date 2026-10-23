@@ -60,5 +60,22 @@ optimization_run_provenance = Table(
 )
 
 
+optimization_jobs = Table(
+    "optimization_jobs", metadata,
+    Column("id", String(36), primary_key=True),
+    Column("status", String(20), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("started_at", DateTime(timezone=True)),
+    Column("completed_at", DateTime(timezone=True)),
+    Column("duration_seconds", Float),
+    Column("cache_key", String(64)),
+    Column("payload_json", JSON, nullable=False),
+    Column("result_json", JSON),
+    Column("error", Text),
+    Column("technical_error", Text),
+    Column("error_status", Integer),
+)
+
+
 def init_db() -> None:
     metadata.create_all(engine)

@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from api.routers.jobs import router as jobs_router
 from api.routers.health import router as health_router
 from api.routers.optimize import router as optimize_router
 from api.routers.runs import router as runs_router
@@ -22,3 +23,9 @@ app.add_middleware(
 app.include_router(health_router, prefix="/health", tags=["health"])
 app.include_router(optimize_router, prefix="/optimize", tags=["optimize"])
 app.include_router(runs_router, prefix="/runs", tags=["runs"])
+app.include_router(jobs_router, prefix="/jobs", tags=["jobs"])
+
+@app.on_event("startup")
+def initialize_jobs():
+    from api.services.jobs import get_manager
+    get_manager()

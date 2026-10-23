@@ -276,9 +276,9 @@ def call_optimize_api(
 
     payload.update(optimization_options or {})
     response = requests.post(
-        f"{api_base_url}/optimize",
+        f"{api_base_url}/jobs",
         json=payload,
-        timeout=300,
+        timeout=15,
     )
 
     if not response.ok:
@@ -404,7 +404,7 @@ def sidebar_controls() -> dict:
         "Correr optimización",
         type="primary",
         use_container_width=True,
-        disabled=invalid_manual_targets,
+        disabled=invalid_manual_targets or bool(st.session_state.get("pending_job_id")),
     )
 
     return {
@@ -425,6 +425,30 @@ def sidebar_controls() -> dict:
         "run_label": run_label,
         "run_clicked": run_clicked,
     }
+
+
+@st.fragment(run_every="2s")
+def poll_optimization_job(api_base_url):
+    job_id = st.session_state.get("pending_job_id")
+    if not job_id:
+        return
+    try:
+        response = requests.get(f"{api_base_url}/jobs/{job_id}", timeout=10)
+        response.raise_for_status()
+        job = response.json()
+    except requests.RequestException as exc:
+        st.warning(f"No se pudo consultar el trabajo {job_id}: {exc}. Se reintentará.")
+        return
+    st.info(f"Trabajo {job_id}: {job['status']}")
+    if job["status"] == "failed":
+        st.error(job.get("error", "Falló el trabajo. Podés volver a enviarlo."))
+        del st.session_state["pending_job_id"]
+    elif job["status"] == "completed":
+        result = job["result_json"]
+        st.session_state.update(last_api_response=result, last_result=result["result"], last_run_id=result.get("run_id"),
+                                last_mlflow_run_id=result.get("mlflow_run_id"), last_mlflow_error=result.get("mlflow_error"))
+        del st.session_state["pending_job_id"]
+        st.rerun()
 
 
 def main() -> None:
@@ -478,6 +502,9 @@ def main() -> None:
             "Los pesos por bloque no suman 100%. Corregilos o activá la normalización automática para poder correr la optimización."
         )
 
+    if st.session_state.get("pending_job_id"):
+        poll_optimization_job(controls["api_base_url"])
+
     if controls["run_clicked"]:
         try:
             with st.spinner("Llamando a FastAPI /optimize ..."):
@@ -492,12 +519,8 @@ def main() -> None:
                     optimization_options=controls["optimization_options"],
                 )
 
-            st.session_state["last_api_response"] = api_response
-            st.session_state["last_result"] = api_response["result"]
-            st.session_state["last_run_id"] = api_response.get("run_id")
-            st.session_state["last_mlflow_run_id"] = api_response.get("mlflow_run_id")
-            st.session_state["last_mlflow_error"] = api_response.get("mlflow_error")
-            st.success("La optimización finalizó correctamente.")
+            st.session_state["pending_job_id"] = api_response["id"]
+            st.rerun()
 
         except Exception as exc:
             st.error(f"La optimización falló: {exc}")
