@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import os
 from pathlib import Path
@@ -49,6 +49,14 @@ optimization_runs = Table(
     Column("weights_json", JSON, nullable=False),
     Column("frontier_json", JSON, nullable=False),
     Column("solver_message", Text, nullable=True),
+)
+
+
+optimization_run_provenance = Table(
+    "optimization_run_provenance", metadata,
+    Column("run_id", Integer, primary_key=True),
+    Column("provenance_json", JSON, nullable=False),
+    Column("tracking_json", JSON, nullable=False),
 )
 
 

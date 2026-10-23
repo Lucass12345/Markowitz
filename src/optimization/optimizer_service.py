@@ -73,7 +73,7 @@ def optimize_portfolio_mode(
         periods=periods,
     )
 
-    return {
+    result = {
         "model_type": model_type,
         "inputs": {
             "targets": targets,
@@ -81,6 +81,7 @@ def optimize_portfolio_mode(
             "rf_annual_simple": rf_annual_simple,
             "rf_log_daily": rf_log_daily,
             "periods": periods,
+            "n_frontier_points": n_frontier_points,
             "risk_config": asdict(risk_config),
             "covariance_estimator": mu.attrs["input_diagnostics"]["estimator"],
             "lstm_selection": mu.attrs["input_diagnostics"]["lstm_selection"],
@@ -96,3 +97,7 @@ def optimize_portfolio_mode(
         "maxsharpe": frontier_result["maxsharpe"],
         "blocks": blocks_result,
     }
+
+    from src.optimization.provenance import seal_snapshot
+    result["provenance"] = seal_snapshot(returns, meta, mu, cov, result)
+    return result

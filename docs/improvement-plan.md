@@ -40,3 +40,30 @@ Los tres primeros commits pasaron 103 pruebas. La fase 4 agrega casos de cobertu
 fallback, señales futuras/caducadas, unidades, versión, moneda y volatilidad diaria.
 La suite completa se ejecuta con `.venv/bin/python -m pytest -q` sin credenciales externas.
 Los contratos HTTP necesitan sockets locales habilitados en este entorno de ejecución.
+
+## P1
+
+- Bloques dinámicos desde metadata; la configuración original queda disponible.
+- Frontera adicional bajo las mismas restricciones, con pesos y diagnósticos de
+  convergencia por punto. La frontera clásica conserva long-only sin bloques ni tope.
+- Estimadores historical (pares), ledoit_wolf (fechas conjuntas observadas) y
+  gjr_garch (correlación histórica regularizada y volatilidades diarias con fallback).
+  Ledoit-Wolf rechaza historia conjunta insuficiente y no imputa retornos.
+- Umbrales LSTM configurables, con comparación estricta `>` y valores originales
+  0,52 / 0,15. El diagnóstico conserva métricas, criterio y split de validación.
+- Walk-forward y ejecución real: ver `backtesting.md` y `verification/walk-forward-smoke.json`.
+- Snapshots de optimización identificados por SHA-256 conservan retornos, metadata,
+  mu, covarianza, resultado y configuración efectiva. `load_snapshot` verifica integridad.
+  La versión de código incluye commit y huella de cambios locales. IDs de modelos
+  y fecha de corte se registran sin depender del puntero activo posterior.
+
+### Migración aditiva de trazabilidad
+
+`python -c 'from app.db import init_db; init_db()'` crea la nueva tabla
+`optimization_run_provenance` mediante `create_all`, sin alterar ni reescribir filas
+históricas. El arranque también la crea. Hacer backup antes de cualquier despliegue.
+Las corridas anteriores tienen `provenance=null` porque no es posible reconstruir
+retroactivamente evidencia que nunca se guardó. Respaldar tanto PostgreSQL como el
+volumen `storage/optimization_snapshots`. MLflow y MinIO registran estados separados;
+un fallo de MinIO conserva el identificador exitoso de MLflow. Las pruebas verifican
+integraciones con dobles; no se ha probado conectividad real con esos servicios.

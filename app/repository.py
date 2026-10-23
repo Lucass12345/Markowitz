@@ -4,27 +4,12 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-from sqlalchemy import desc, insert, select
+from sqlalchemy import desc, insert, select, update
 
-from app.db import engine, init_db, optimization_runs
+from app.db import engine, init_db, optimization_runs, optimization_run_provenance
 
 
-def _to_builtin(value: Any) -> Any:
-    if isinstance(value, dict):
-        return {str(k): _to_builtin(v) for k, v in value.items()}
-    if isinstance(value, list):
-        return [_to_builtin(v) for v in value]
-    if isinstance(value, tuple):
-        return [_to_builtin(v) for v in value]
-    if isinstance(value, np.integer):
-        return int(value)
-    if isinstance(value, np.floating):
-        return float(value)
-    if isinstance(value, np.ndarray):
-        return [_to_builtin(v) for v in value.tolist()]
-    if isinstance(value, pd.Timestamp):
-        return value.isoformat()
-    return value
+from src.utils.serialization import to_builtin as _to_builtin
 
 
 def _df_to_records(df: pd.DataFrame) -> list[dict]:
@@ -85,6 +70,9 @@ def save_run(run_label: str | None, config: dict, result: dict) -> int:
             ).first()
             inserted_id = int(row[0])
 
+        if result.get("provenance"):
+            conn.execute(insert(optimization_run_provenance).values(run_id=int(inserted_id),
+                provenance_json=_to_builtin(result["provenance"]), tracking_json={}))
     return int(inserted_id)
 
 
@@ -131,4 +119,14 @@ def get_run_by_id(run_id: int) -> dict | None:
     if not row:
         return None
 
-    return dict(row)
+    result = dict(row)
+    with engine.begin() as conn:
+        details = conn.execute(select(optimization_run_provenance).where(optimization_run_provenance.c.run_id == run_id)).mappings().first()
+    result["provenance"] = dict(details) if details else None
+    return result
+
+
+def record_run_tracking(run_id, tracking):
+    with engine.begin() as conn:
+        conn.execute(update(optimization_run_provenance).where(optimization_run_provenance.c.run_id == run_id)
+                     .values(tracking_json=_to_builtin(tracking)))
