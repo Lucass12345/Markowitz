@@ -56,3 +56,8 @@ para una reversión operativa manual antes de adoptar esta modalidad.
 Pruebas offline: activación y rollback, lectura de señales fijadas aunque cambie el puntero,
 rechazo de mala validación pese a test perfecto, corrupción y archivos con path traversal.
 No se ejecutó un workflow remoto ni se activó el dataset real de este entorno.
+
+Los campos de ruteo y controles de calidad de `release.json` deben coincidir con
+`candidate.json`, incluido en el digest. El pull sólo admite eventos schedule/workflow_dispatch,
+repositorio de origen esperado, workflow Yahoo de main y commit del candidato igual al SHA
+del run. Reactivar el mismo ID es idempotente y no pierde el anterior para rollback.

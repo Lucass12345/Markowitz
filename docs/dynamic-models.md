@@ -77,3 +77,12 @@ python -m pytest -q
 El estudio compara retornos solos y estadísticas de retornos sobre un snapshot fijo. Guarda las comparaciones y selecciona por RMSE de validación en `outputs/model_search/`, sin activar corridas experimentales. Es evidencia sobre esos activos, fechas, presupuesto de épocas y semilla; no demuestra una ventaja universal. Para otro universo debe repetirse la selección.
 
 `.github/workflows/yahoo-models.yml` prepara descarga y entrenamiento diarios a las 03:30 UTC de martes a sábado, además de ejecución manual con tickers propios. Se activará al subir el archivo a GitHub y habilitar Actions. El workflow conserva bundles candidatos como artefactos de 30 días, tras controles de calidad; **no modifica el contenedor de serving**. `scripts/pull_release.py` descarga una corrida exitosa de main, verifica contenido/calidad y opcionalmente activa el bundle sobre el volumen compartido. Ver [publicación](publication.md). Cada ejecución programada parte del universo CSV versionado del repositorio; una selección manual no cambia los futuros cron. Para persistir un universo diferente, editar el comando o el CSV versionado. En un servidor persistente puede programarse `run_refresh_dataset.py --retrain` con cron; usará el universo activo local.
+
+## Compatibilidad MLP
+
+La selección MLP también utiliza únicamente validación y registra la política efectiva.
+Los scores antiguos basados en test no se reutilizan. El laboratorio nuevo exige targets
+completos, purga los bordes del horizonte y ajusta límites de winsorization sólo en entrenamiento.
+Las corridas antiguas sin evidencia y el MLP clásico sin validación quedan como fallback
+histórico. Los resultados almacenados no se alteran. La fecha `as_of` describe la ventana
+realmente inferida; no se adelanta artificialmente al corte del dataset.

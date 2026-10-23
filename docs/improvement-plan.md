@@ -93,3 +93,31 @@ La suite ampliada pasó **155 pruebas** y lint/compilación. Compose de desarrol
 validan la configuración. Docker no pudo construir/arrancar por permiso denegado al daemon;
 no se verificaron servicios externos reales, un workflow remoto ni un despliegue cloud.
 Las pruebas de SQL usan SQLite y los contratos remotos emplean dobles.
+
+## Verificación final y correcciones de revisión
+
+**185 pruebas aprobadas** en un entorno limpio: Python 3.11.12, Torch 2.6.0+cpu,
+ARCH 7.2.0, NumPy 2.1.3 y los demás requisitos fijados del repositorio. Ruff, compileall,
+`git diff --check` y ambos `docker compose ... config --quiet` pasaron. Las advertencias
+observadas son de deprecación de dependencias, no fallos de pruebas.
+
+La revisión agregó regresiones para metadata de releases alterada, origen PR/fork de
+artefactos, reactivación idempotente, rollback desde un manifiesto activo corrupto,
+alineación de etiquetas en contribuciones de riesgo y recuperación del botón de envío
+tras un job fallido. Los snapshots combinados conservan IDs tanto de retornos como de GARCH.
+
+El MLP existente también seleccionaba activos con test: el composite conserva sus pesos,
+pero ahora usa validación y registra política/motivo. No se reutilizan scores históricos de
+test. Sus targets exigen todas las ruedas, se purgan bordes y winsorization aprende límites
+sólo con entrenamiento. Los parámetros/arquitecturas y filas históricas no se reescriben.
+MLP clásico sin tramo de validación y corridas antiguas sin evidencia quedan deshabilitados
+para señal IA con fallback histórico; usar un nuevo laboratorio con evidencia verificable.
+Los nuevos archivos exportan fecha real de inferencia, unidades diarias e identidad.
+No se requiere migrar columnas existentes: se recupera evidencia adicional de los artefactos.
+
+`verification/real-classic-optimization.json` registra una optimización ejecutada sobre los
+40 activos USD, con diez puntos restringidos verificados. El metadata activo clasifica GLD
+como OTHER; los objetivos legacy con GOLD se rechazaron correctamente. La verificación
+asignó explícitamente 10% a OTHER, sin cambiar metadata ni resultados guardados. Sus métricas
+son estimaciones ex ante, no rendimiento OOS. El backtest de demostración sigue sin ser
+suficiente para declarar superioridad predictiva.
