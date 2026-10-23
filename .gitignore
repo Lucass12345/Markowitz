@@ -10,3 +10,5 @@ models_artifacts/returns_lstm/runs/
 
 outputs/backtesting/
 storage/optimization_snapshots/
+Data/releases/
+Data/active_release.json

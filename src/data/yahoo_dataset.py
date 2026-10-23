@@ -44,12 +44,16 @@ def classify_asset(ticker, info):
 
 
 def refresh_dataset(tickers, start="2015-01-01", end=None, data_dir=DATA_DIR, provider=None,
-                    *, ccl_file=None, ccl_rates=None, max_fx_age_days=7):
+                    *, activate=True, ccl_file=None, ccl_rates=None, max_fx_age_days=7):
     """Adjusted daily closes -> log returns; no forward filling across market holidays.
 
     end is exclusive. A full refresh also incorporates Yahoo historical revisions.
     Missing country/sector is explicitly unknown, never inferred from domicile.
     """
+    if activate:
+        from src.publication.releases import active_release
+        if active_release(data_dir) is not None:
+            raise ValueError("Hay un release activo: usá publicación de candidato con reentrenamiento para actualizar datos y modelos juntos.")
     if provider is None:
         import yfinance as yf
         provider = yf.Ticker
@@ -102,6 +106,8 @@ def refresh_dataset(tickers, start="2015-01-01", end=None, data_dir=DATA_DIR, pr
                     current_utc_session_excluded=True,
                     latest_observation={t: str(s.index[-1].date()) for t, s in prices.items()})
     (folder / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    if not activate:
+        return manifest
     temporary = data_dir / f".active_dataset_{version}.json"
     temporary.write_text(json.dumps({"version": version}), encoding="utf-8")
     temporary.replace(data_dir / "active_dataset.json")

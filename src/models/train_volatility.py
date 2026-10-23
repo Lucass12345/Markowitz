@@ -16,6 +16,9 @@ def forecast_all_volatility(
     start_date: str = "2022-01-01",
     min_obs: int = 252,
     validation_days: int = 20,
+    returns_df: pd.DataFrame | None = None,
+    dataset_version: str | None = None,
+    output_dir: Path | None = None,
 ):
     """
     Generates one-step-ahead volatility forecasts for all assets.
@@ -30,7 +33,9 @@ def forecast_all_volatility(
     - outputs/predictions/volatility_predictions.csv
     """
     dataset_dir = active_data_dir()
-    returns = load_returns(data_dir=dataset_dir).copy()
+    returns = load_returns(data_dir=dataset_dir).copy() if returns_df is None else returns_df.copy()
+    dataset_version = dataset_version or dataset_dir.name
+    output_dir = Path(output_dir) if output_dir is not None else OUTPUT_DIR
     returns.index = pd.to_datetime(returns.index)
 
     if start_date:
@@ -67,7 +72,9 @@ def forecast_all_volatility(
             "var_pred": var_pred,
             "vol_pred": vol_pred,
             "model_source": source,
-            "dataset_version": dataset_dir.name,
+            "dataset_version": dataset_version,
+            "model_run_id": f"{dataset_version}:{source}:{s.index[-1].date()}",
+            "prediction_units": "daily_log_volatility",
             "base_currency": "USD",
             "fallback_reason": error,
             "forecast_horizon": 5,
@@ -84,14 +91,14 @@ def forecast_all_volatility(
             "train_end": str(s.index.max().date()),
         })
 
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     df = pd.DataFrame(rows).sort_values("ticker").reset_index(drop=True) if rows else pd.DataFrame(columns=["ticker", "var_pred", "vol_pred"])
-    (OUTPUT_DIR / "garch_diagnostics.json").write_text(json.dumps(diagnostics, indent=2), encoding="utf-8")
-    df.to_csv(OUTPUT_DIR / "volatility_predictions.csv", index=False)
+    (output_dir / "garch_diagnostics.json").write_text(json.dumps(diagnostics, indent=2), encoding="utf-8")
+    df.to_csv(output_dir / "volatility_predictions.csv", index=False)
 
     print("\nVolatility forecast file generated:")
-    print(OUTPUT_DIR / "volatility_predictions.csv")
+    print(output_dir / "volatility_predictions.csv")
     print("\nModel source counts:")
     if not df.empty:
         print(df["model_source"].value_counts())

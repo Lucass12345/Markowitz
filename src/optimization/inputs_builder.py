@@ -50,6 +50,14 @@ def _load_signals(mode):
     raise OptimizationInputError(f"Invalid model_type: {mode}")
 
 
+def _pinned_signals(mode, returns):
+    released = returns.attrs.get("release_dir")
+    if released and mode in {"ai_returns_lstm", "ai_volatility"}:
+        name = "lstm" if mode == "ai_returns_lstm" else "garch"
+        return pd.read_csv(Path(released) / "predictions" / f"{name}.csv")
+    return _load_signals(mode)
+
+
 def _build_ai_vol_cov(historical_cov, pred_vol):
     historical_vol = np.sqrt(np.diag(historical_cov))
     corr = historical_cov / np.outer(historical_vol, historical_vol)
@@ -78,7 +86,7 @@ def build_model_inputs(model_type, returns, risk_config=None, prediction_fallbac
     diagnostics["estimator"] = estimator
     mu = returns.mean()
     value_column = "vol_pred" if model_type == "ai_volatility" else "mu_pred"
-    predictions = checked_predictions(_load_signals(model_type if model_type != "ai_volatility" or estimator == "gjr_garch" else "classic"), returns, value_column)
+    predictions = checked_predictions(_pinned_signals(model_type if model_type != "ai_volatility" or estimator == "gjr_garch" else "classic", returns), returns, value_column)
     vol = pd.Series(np.sqrt(np.diag(cov)), index=cov.index)
     signals = []
     for ticker in returns:
@@ -111,7 +119,7 @@ def build_model_inputs(model_type, returns, risk_config=None, prediction_fallbac
         signals.append(signal)
     if estimator == "gjr_garch":
         if model_type != "ai_volatility":
-            volatility_predictions = checked_predictions(_load_signals("ai_volatility"), returns, "vol_pred")
+            volatility_predictions = checked_predictions(_pinned_signals("ai_volatility", returns), returns, "vol_pred")
             risk_signals = []
             for ticker in returns:
                 row = volatility_predictions.loc[ticker] if ticker in volatility_predictions.index else None
