@@ -119,7 +119,11 @@ def run_lstm_lab(
     publish_latest: bool = True,
     returns_df: pd.DataFrame | None = None,
     dataset_version: str | None = None,
+    lstm_direction_min: float = .52,
+    lstm_amplitude_min: float = .15,
 ):
+    from src.optimization.predictions import LSTMSelection
+    selection = LSTMSelection(lstm_direction_min, lstm_amplitude_min)
     if forecast_horizon != 5:
         raise ValueError("El horizonte de producción es de cinco ruedas bursátiles")
     dataset_dir = active_data_dir()
@@ -377,6 +381,7 @@ def run_lstm_lab(
         "feature_search": feature_search,
         "search": search,
         "selection_metric": "validation_mse",
+        "optimizer_selection_defaults": {"direction_min": selection.direction_min, "amplitude_min": selection.amplitude_min, "split": "validation"},
         "test_used_for_selection": False,
         "epochs": epochs,
         "batch_size": batch_size,

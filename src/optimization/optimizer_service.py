@@ -21,6 +21,8 @@ def optimize_portfolio_mode(
     prediction_fallback: str = "historical",
     max_prediction_age_days: int = 7,
     covariance_estimator: str | None = None,
+    lstm_direction_min: float = .52,
+    lstm_amplitude_min: float = .15,
 ) -> dict:
     """
     Orquestador principal para los 3 modos:
@@ -42,6 +44,8 @@ def optimize_portfolio_mode(
         prediction_fallback=prediction_fallback,
         max_prediction_age_days=max_prediction_age_days,
         covariance_estimator=covariance_estimator,
+        lstm_direction_min=lstm_direction_min,
+        lstm_amplitude_min=lstm_amplitude_min,
     )
 
     blocks = validate_optimizer_inputs(mu, cov, tickers, meta, targets, max_weight)
@@ -79,6 +83,7 @@ def optimize_portfolio_mode(
             "periods": periods,
             "risk_config": asdict(risk_config),
             "covariance_estimator": mu.attrs["input_diagnostics"]["estimator"],
+            "lstm_selection": mu.attrs["input_diagnostics"]["lstm_selection"],
             "prediction_fallback": prediction_fallback,
             "max_prediction_age_days": max_prediction_age_days,
             "dataset_version": dataset_dir.name,

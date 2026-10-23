@@ -77,3 +77,14 @@ def test_missing_file_falls_back_and_classic_ignores_strict_policy(monkeypatch, 
     assert tickers == ['A','B']
     pd.testing.assert_series_equal(mu,data.mean())
     builder.build_model_inputs('classic',data,RiskConfig(4,2),prediction_fallback='required')
+
+
+def test_configurable_validation_thresholds_record_exact_decision(monkeypatch, data):
+    rows=[signal(dir_acc_val=.55,amp_ratio=.2)]
+    mu,_,_=build(monkeypatch,data,rows,lstm_direction_min=.56)
+    assert mu.A==data.A.mean()
+    assert mu.attrs['input_diagnostics']['lstm_selection']['direction_min']==.56
+    mu,_,_=build(monkeypatch,data,rows,lstm_direction_min=.54,lstm_amplitude_min=.19)
+    assert mu.A==.004
+    mu,_,_=build(monkeypatch,data,rows,lstm_amplitude_min=.2)
+    assert mu.attrs['input_diagnostics']['signals'][0]['reason']=='validation_amplitude_below_threshold'

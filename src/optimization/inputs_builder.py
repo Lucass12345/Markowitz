@@ -4,7 +4,7 @@ import pandas as pd
 from sqlalchemy.exc import SQLAlchemyError
 from src.optimization.errors import OptimizationInputError
 from src.optimization.covariance import RiskConfig, estimate_historical_risk, regularize_covariance, ledoit_wolf_covariance
-from src.optimization.predictions import PredictionPolicy, checked_predictions, row_reason, require_or_fallback
+from src.optimization.predictions import PredictionPolicy, checked_predictions, row_reason, require_or_fallback, LSTMSelection
 from src.optimization.lstm_lab_loader import load_active_lstm_predictions_df
 from src.optimization.mlp_lab_loader import load_active_mlp_predictions
 
@@ -61,11 +61,12 @@ def _finite_metric(row, key):
     return float(value) if value is not None and np.isfinite(value) else None
 
 
-def build_model_inputs(model_type, returns, risk_config=None, prediction_fallback="historical", max_prediction_age_days=7, covariance_estimator=None):
+def build_model_inputs(model_type, returns, risk_config=None, prediction_fallback="historical", max_prediction_age_days=7, covariance_estimator=None, lstm_direction_min=.52, lstm_amplitude_min=.15):
     model_type = str(model_type).strip().lower()
     if model_type not in {"classic", "ai_returns", "ai_returns_lstm", "ai_volatility"}:
         raise OptimizationInputError(f"Invalid model_type: {model_type}")
     risk_config = risk_config or RiskConfig()
+    selection = LSTMSelection(lstm_direction_min, lstm_amplitude_min)
     policy = PredictionPolicy(prediction_fallback, max_prediction_age_days)
     returns, cov, diagnostics = estimate_historical_risk(returns, risk_config)
     estimator = covariance_estimator or ("gjr_garch" if model_type == "ai_volatility" else "historical")
@@ -86,9 +87,9 @@ def build_model_inputs(model_type, returns, risk_config=None, prediction_fallbac
         if reason is None and model_type == "ai_returns_lstm":
             direction = pd.to_numeric(row.get("dir_acc_val"), errors="coerce")
             amplitude = pd.to_numeric(row.get("amp_ratio"), errors="coerce")
-            if not np.isfinite(direction) or not direction > LSTM_DIR_ACC_MIN:
+            if not np.isfinite(direction) or not direction > selection.direction_min:
                 reason = "validation_direction_below_threshold"
-            elif not np.isfinite(amplitude) or not amplitude > LSTM_AMP_RATIO_MIN:
+            elif not np.isfinite(amplitude) or not amplitude > selection.amplitude_min:
                 reason = "validation_amplitude_below_threshold"
         if reason is None and row is not None and "use_for_optimizer" in row and str(row["use_for_optimizer"]).lower() != "true":
             reason = "producer_validation_rejected"
@@ -123,5 +124,5 @@ def build_model_inputs(model_type, returns, risk_config=None, prediction_fallbac
         cov = _build_ai_vol_cov(cov, vol)
     cov, final_diagnostics = regularize_covariance(cov, risk_config)
     mu.attrs["input_diagnostics"] = {**diagnostics, "final_covariance": final_diagnostics,
-                                    "signals": signals, "prediction_policy": {"fallback": policy.fallback, "max_age_days": policy.max_age_days}}
+                                    "signals": signals, "lstm_selection": {"direction_min": selection.direction_min, "amplitude_min": selection.amplitude_min, "split": "validation", "comparison": "strictly_greater"}, "prediction_policy": {"fallback": policy.fallback, "max_age_days": policy.max_age_days}}
     return mu, cov, list(mu.index)

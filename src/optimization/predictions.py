@@ -66,3 +66,13 @@ def row_reason(row, series, value_column, policy):
 def require_or_fallback(ticker, reason, policy):
     if reason and policy.fallback == "required":
         raise OptimizationInputError(f"Required prediction unavailable for {ticker}: {reason}")
+
+
+@dataclass(frozen=True)
+class LSTMSelection:
+    direction_min: float = .52
+    amplitude_min: float = .15
+
+    def __post_init__(self):
+        if not np.isfinite(self.direction_min) or not 0 <= self.direction_min <= 1 or not np.isfinite(self.amplitude_min) or self.amplitude_min < 0:
+            raise OptimizationInputError("Invalid LSTM validation thresholds")

@@ -22,6 +22,8 @@ class OptimizeRequest(BaseModel):
     prediction_fallback: Literal["historical", "required"] = "historical"
     max_prediction_age_days: int = Field(7, ge=0)
     covariance_estimator: Literal["historical", "ledoit_wolf", "gjr_garch"] | None = None
+    lstm_direction_min: float = Field(.52, ge=0, le=1, allow_inf_nan=False)
+    lstm_amplitude_min: float = Field(.15, ge=0, allow_inf_nan=False)
     run_label: str | None = Field(default=None)
 
     @model_validator(mode="after")

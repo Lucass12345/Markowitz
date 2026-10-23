@@ -377,6 +377,8 @@ def sidebar_controls() -> dict:
     with st.sidebar.expander("Calidad de datos y predicciones"):
         covariance_estimator = st.selectbox("Estimador de covarianza", [None, "historical", "ledoit_wolf", "gjr_garch"],
                                             format_func=lambda x: x or "Predeterminado del modo")
+        lstm_direction_min = st.number_input("Dirección mínima LSTM (validación, >)", min_value=0., max_value=1., value=.52)
+        lstm_amplitude_min = st.number_input("Amplitud mínima LSTM (validación, >)", min_value=0., value=.15)
         min_history = st.number_input("Observaciones mínimas por activo", min_value=2, value=252)
         min_overlap = st.number_input("Observaciones mínimas por par", min_value=2, value=126)
         prediction_fallback = st.selectbox("Predicción faltante o inválida", ["historical", "required"],
@@ -407,7 +409,8 @@ def sidebar_controls() -> dict:
     return {
         "optimization_options": {"min_history": int(min_history), "min_overlap": int(min_overlap),
                                  "prediction_fallback": prediction_fallback, "max_prediction_age_days": int(max_prediction_age_days),
-                                 "covariance_estimator": covariance_estimator},
+                                 "covariance_estimator": covariance_estimator, "lstm_direction_min": lstm_direction_min,
+                                 "lstm_amplitude_min": lstm_amplitude_min},
         "api_base_url": api_base_url,
         "mode": mode,
         "targets": targets,
