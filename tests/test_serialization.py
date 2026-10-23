@@ -24,3 +24,8 @@ def test_non_finite_nested_numpy_pandas_and_json_contract():
 def test_legacy_service_import_has_no_side_effects():
     service=importlib.import_module('api.services.optimizer_service')
     assert callable(service.run_optimization)
+
+
+def test_zero_dimensional_numpy_array_serializes_like_scalar():
+    assert to_builtin(np.array(np.inf)) is None
+    assert to_builtin(np.array(2.5))==2.5

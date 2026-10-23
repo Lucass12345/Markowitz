@@ -443,10 +443,12 @@ def poll_optimization_job(api_base_url):
         return
     st.info(f"Trabajo {job_id}: {job['status']}")
     if job["status"] == "failed":
-        st.error(job.get("error", "Falló el trabajo. Podés volver a enviarlo."))
+        st.session_state["last_job_error"] = job.get("error", "Falló el trabajo. Podés volver a enviarlo.")
         del st.session_state["pending_job_id"]
+        st.rerun()
     elif job["status"] == "completed":
         result = job["result_json"]
+        st.session_state.pop("last_job_error", None)
         st.session_state.update(last_api_response=result, last_result=result["result"], last_run_id=result.get("run_id"),
                                 last_mlflow_run_id=result.get("mlflow_run_id"), last_mlflow_error=result.get("mlflow_error"))
         del st.session_state["pending_job_id"]
@@ -462,6 +464,8 @@ def main() -> None:
     st.caption("Optimización de carteras con retornos expresados en USD. Las cotizaciones en ARS se convierten con CCL histórico.")
 
     controls = sidebar_controls()
+    if st.session_state.get("last_job_error"):
+        st.error(st.session_state["last_job_error"])
 
     top_health_left, top_health_right = st.columns([1, 2])
     with top_health_left:

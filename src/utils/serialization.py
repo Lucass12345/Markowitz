@@ -11,6 +11,8 @@ def to_builtin(value):
         return None
     if isinstance(value,dict):
         return {str(k):to_builtin(v) for k,v in value.items()}
+    if isinstance(value,np.ndarray) and value.ndim == 0:
+        return to_builtin(value.item())
     if isinstance(value,(list,tuple,np.ndarray)):
         return [to_builtin(v) for v in value]
     if isinstance(value,pd.DataFrame):

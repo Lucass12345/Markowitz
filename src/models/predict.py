@@ -20,7 +20,10 @@ def build_prediction_table():
     if ret["dataset_version"].iloc[0] != vol["dataset_version"].iloc[0]:
         raise ValueError("Las predicciones de retornos y volatilidad pertenecen a datasets diferentes.")
     # Keep one common provenance; prevent ambiguous dataset_version_x/y fields.
-    df = ret.merge(vol.drop(columns=["dataset_version", "base_currency"]), on="ticker", validate="one_to_one")
+    volatility = vol.drop(columns=["dataset_version", "base_currency"])
+    collisions = (set(ret.columns) & set(volatility.columns)) - {"ticker"}
+    volatility = volatility.rename(columns={name: f"volatility_{name}" for name in collisions})
+    df = ret.merge(volatility, on="ticker", validate="one_to_one")
     assert_current_dataset(df)
     df.to_csv(OUTPUT_DIR / "predictions.csv", index=False)
     print(df.head())

@@ -43,3 +43,20 @@ def test_diagnostic_page_reports_unconfirmed_sync(monkeypatch):
     app=AppTest.from_file(str(ROOT/'app/pages/06_Diagnostico.py')).run(timeout=10)
     assert not app.exception
     assert len(app.json)==3
+
+
+def test_failed_job_reenables_submission_and_preserves_error(monkeypatch):
+    from app import db
+    monkeypatch.setattr(db,'init_db',lambda:None)
+    def get(url=None,**kwargs):
+        if url.endswith('/optimize/metadata'):
+            return reply({'dataset_version':'fixture','blocks':{'OTHER':1},'default_targets':{'OTHER':1.},'legacy_targets':{'OTHER':1.}})
+        if '/jobs/' in url:return reply({'status':'failed','error':'Infeasible OTHER capacity'})
+        return reply({'status':'ok'})
+    monkeypatch.setattr(requests,'get',get)
+    monkeypatch.setattr(requests,'post',lambda **kwargs:reply({'id':'failed-job'}))
+    app=AppTest.from_file(str(ROOT/'app/Optimizador_Markowitz.py')).run(timeout=15)
+    next(item for item in app.sidebar.button if item.label=='Correr optimización').click().run(timeout=15)
+    assert not app.exception
+    assert not next(item for item in app.sidebar.button if item.label=='Correr optimización').disabled
+    assert any('Infeasible OTHER' in message.value for message in app.error)
