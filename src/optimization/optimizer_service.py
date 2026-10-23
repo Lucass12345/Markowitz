@@ -3,7 +3,7 @@ from src.markowitz import rf_simple_annual_to_log_daily
 from src.data.load_data import load_returns, load_metadata
 from src.optimization.inputs_builder import build_model_inputs
 from src.optimization.frontier_engine import run_frontier
-from src.optimization.optimize_blocks import run_blocks_optimizer
+from src.optimization.optimize_blocks import run_blocks_optimizer, validate_optimizer_inputs
 
 def optimize_portfolio_mode(
     model_type: str,
@@ -29,9 +29,9 @@ def optimize_portfolio_mode(
         returns=returns,
     )
 
-    if hasattr(mu, "index") and hasattr(cov, "loc"):
-        cov = cov.loc[mu.index, mu.index]
-        tickers = list(mu.index)
+    validate_optimizer_inputs(mu, cov, tickers, meta, targets, max_weight)
+    if hasattr(cov, "loc"):
+        cov = cov.loc[tickers, tickers]
 
     frontier_result = run_frontier(
         mu=mu,

@@ -4,13 +4,15 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
+from src.optimization.errors import validate_targets
+
 ModelType = Literal["classic", "ai_returns", "ai_returns_lstm", "ai_volatility"]
 
 
 class OptimizeRequest(BaseModel):
     model_type: ModelType = Field(..., description="Optimization mode")
     targets: dict[str, float] = Field(..., description="Block targets")
-    max_weight: float = Field(0.15, ge=0.0, le=1.0)
+    max_weight: float = Field(0.15, gt=0.0, le=1.0)
     rf_annual_simple: float = Field(0.0, ge=0.0, le=1.0)
     n_frontier_points: int = Field(80, ge=10, le=500)
     run_label: str | None = Field(default=None)
@@ -28,9 +30,7 @@ class OptimizeRequest(BaseModel):
                 f"Missing={sorted(missing)} Extra={sorted(extra)}"
             )
 
-        total = sum(float(v) for v in self.targets.values())
-        if total <= 0:
-            raise ValueError("Targets must sum to a positive value.")
+        validate_targets(self.targets)
 
         return self
 
