@@ -18,3 +18,13 @@ def optimize_portfolio(payload: OptimizeRequest) -> OptimizeResponse:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Optimization failed: {exc}") from exc
+
+@router.get("/metadata")
+def optimization_metadata():
+    from src.config import block_configuration
+    from src.data.load_data import active_data_dir, load_metadata
+    try:
+        directory = active_data_dir()
+        return {"dataset_version": directory.name, **block_configuration(load_metadata(data_dir=directory))}
+    except OptimizationInputError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc

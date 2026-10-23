@@ -22,9 +22,8 @@ def test_schema_rejects_invalid_targets(targets):
         OptimizeRequest(model_type="classic", targets=targets)
 
 
-def test_api_keeps_exact_five_blocks_and_disallows_zero_cap():
-    with pytest.raises(ValidationError):
-        OptimizeRequest(model_type="classic", targets={"OTHER": 1.})
+def test_api_accepts_custom_blocks_and_disallows_zero_cap():
+    assert OptimizeRequest(model_type="classic", targets={"OTHER": 1.}).targets == {"OTHER": 1.}
     with pytest.raises(ValidationError):
         OptimizeRequest(model_type="classic", targets=TARGETS, max_weight=0.)
     assert OptimizeRequest(model_type="classic", targets=TARGETS).targets == TARGETS

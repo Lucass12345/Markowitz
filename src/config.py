@@ -17,3 +17,20 @@ DEFAULT_CONFIG = PortfolioConfig(
     risk_free_annual_simple=0.0,
     max_weight_blocks=0.15,
 )
+
+
+def block_configuration(metadata):
+    """Available blocks from the dataset; retain legacy targets for the legacy universe."""
+    from src.optimization.errors import OptimizationInputError
+    if not {"ticker", "block"}.issubset(metadata.columns):
+        raise OptimizationInputError("Metadata requires ticker and block")
+    if metadata.ticker.duplicated().any() or metadata.block.isna().any():
+        raise OptimizationInputError("Metadata contains duplicate tickers or missing blocks")
+    names = metadata.block.map(lambda value: str(value).strip())
+    if names.eq("").any():
+        raise OptimizationInputError("Metadata block cannot be empty")
+    counts = {name: int(value) for name, value in names.value_counts().sort_index().items()}
+    if not counts:
+        raise OptimizationInputError("No available blocks")
+    targets = dict(DEFAULT_CONFIG.targets) if set(counts) == set(DEFAULT_CONFIG.targets) else {name: 1 / len(counts) for name in counts}
+    return {"blocks": counts, "default_targets": targets, "legacy_targets": dict(DEFAULT_CONFIG.targets)}

@@ -23,14 +23,6 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-BLOCKS = ["AR", "US", "FUNDS_EQUITY", "FUNDS_BONDS", "GOLD"]
-DEFAULT_TARGETS = {
-    "AR": 0.20,
-    "US": 0.50,
-    "FUNDS_EQUITY": 0.10,
-    "FUNDS_BONDS": 0.10,
-    "GOLD": 0.10,
-}
 MODES = ["classic", "ai_returns", "ai_returns_lstm", "ai_volatility"]
 MODE_LABELS = {
     "classic": "Markowitz clásico",
@@ -250,7 +242,7 @@ def build_block_exposure_chart(exposure_df: pd.DataFrame) -> go.Figure:
     return fig
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, ttl=30)
 def check_api_health(api_base_url: str) -> dict:
     response = requests.get(f"{api_base_url}/health", timeout=15)
     response.raise_for_status()
@@ -326,13 +318,27 @@ def sidebar_controls() -> dict:
     st.sidebar.info(MODE_HELP[mode])
 
     st.sidebar.markdown("### Objetivos por bloque")
+    try:
+        response = requests.get(f"{api_base_url}/optimize/metadata", timeout=10)
+        response.raise_for_status()
+        metadata = response.json()
+        targets_default = metadata["default_targets"]
+        st.sidebar.caption(f"Dataset: {metadata['dataset_version']} · Activos por bloque: {metadata['blocks']}")
+        if st.sidebar.checkbox("Configuración histórica de cinco bloques", value=False):
+            targets_default = metadata["legacy_targets"]
+    except (requests.RequestException, ValueError, KeyError):
+        from src.config import block_configuration
+        from src.data.load_data import load_metadata
+        targets_default = block_configuration(load_metadata())["default_targets"]
+        st.sidebar.warning("Metadata local: no se pudo consultar la API.")
     raw_targets = {}
-    for block in BLOCKS:
+    for block in targets_default:
         raw_targets[block] = st.sidebar.number_input(
             f"{block}",
             min_value=0.0,
             max_value=1.0,
-            value=float(DEFAULT_TARGETS[block]),
+            value=float(targets_default[block]),
+            key=f"target_{block}",
             step=0.01,
             format="%.2f",
         )

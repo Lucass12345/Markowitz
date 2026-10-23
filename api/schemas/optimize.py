@@ -25,17 +25,6 @@ class OptimizeRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_targets(self) -> "OptimizeRequest":
-        expected_blocks = {"AR", "US", "FUNDS_EQUITY", "FUNDS_BONDS", "GOLD"}
-        received_blocks = set(self.targets.keys())
-
-        if received_blocks != expected_blocks:
-            missing = expected_blocks - received_blocks
-            extra = received_blocks - expected_blocks
-            raise ValueError(
-                f"Targets must contain exactly these blocks: {sorted(expected_blocks)}. "
-                f"Missing={sorted(missing)} Extra={sorted(extra)}"
-            )
-
         validate_targets(self.targets)
 
         return self

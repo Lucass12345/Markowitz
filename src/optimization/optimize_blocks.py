@@ -25,6 +25,7 @@ def _aligned_metadata(tickers, meta):
     metadata = metadata.set_index("ticker").loc[tickers]
     if metadata["block"].isna().any() or not metadata["block"].map(lambda b: isinstance(b, str) and bool(b.strip())).all():
         raise OptimizationInputError("Every selected ticker requires a nonempty block label.")
+    metadata["block"] = metadata["block"].str.strip()
     return metadata
 
 
@@ -109,4 +110,9 @@ def run_blocks_optimizer(
         "stats": stats,
         "exposure_by_block": exposures_df,
         "solver_message": res.message,
+        "coverage": {
+            "available_blocks": meta2["block"].value_counts().to_dict(),
+            "requested_blocks": list(targets),
+            "zero_weight_unrequested_assets": meta2.loc[~meta2["block"].isin(targets), "ticker"].tolist(),
+        },
     }
