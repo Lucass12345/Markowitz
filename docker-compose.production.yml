@@ -1,0 +1,124 @@
+# Separate deployment. Serve Streamlit through a TLS reverse proxy on the host.
+services:
+  postgres:
+    image: postgres:16.8-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?required}
+      POSTGRES_USER: ${POSTGRES_USER:?required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?required}
+    volumes:
+      - postgres_prod:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [backend]
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    restart: unless-stopped
+    command: server /data --console-address ':9001'
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?required}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?required}
+    volumes:
+      - minio_prod:/data
+    healthcheck:
+      test: [CMD, curl, -f, http://localhost:9000/minio/health/live]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    networks: [backend]
+  mlflow:
+    image: ${MLFLOW_IMAGE:?set a built image tag or digest}
+    build:
+      context: .
+      dockerfile: docker/mlflow.Dockerfile
+    restart: unless-stopped
+    volumes:
+      - mlflow_prod:/mlflow
+    healthcheck:
+      test: [CMD, python, -c, 'import urllib.request; urllib.request.urlopen("http://localhost:5000/health", timeout=3)']
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    networks: [backend]
+  fastapi:
+    image: ${API_IMAGE:?set a built image tag or digest}
+    build:
+      context: .
+      dockerfile: docker/fastapi.Dockerfile
+      args:
+        CODE_VERSION: ${CODE_VERSION:?required}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mlflow:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      APP_ENV: production
+      CODE_VERSION: ${CODE_VERSION:?required}
+      DATABASE_URL: ${DATABASE_URL:?required}
+      MARKOWITZ_API_KEY: ${MARKOWITZ_API_KEY:?required}
+      MARKOWITZ_READ_API_KEY: ${MARKOWITZ_READ_API_KEY:-}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:?required}
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:?required}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:?required}
+      OPTIMIZATION_SNAPSHOT_DIR: /apprepo/storage/optimization_snapshots
+      MPLCONFIGDIR: /tmp/matplotlib
+    volumes:
+      - ${DATA_VOLUME_PATH:?required}:/apprepo/Data:ro
+      - snapshots_prod:/apprepo/storage
+    healthcheck:
+      test: [CMD, python, -c, 'import urllib.request; urllib.request.urlopen("http://localhost:8000/health/ready", timeout=8)']
+      interval: 15s
+      timeout: 10s
+      retries: 10
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    networks: [backend]
+  streamlit:
+    image: ${STREAMLIT_IMAGE:?set a built image tag or digest}
+    build:
+      context: .
+      dockerfile: docker/streamlit.Dockerfile
+      args:
+        CODE_VERSION: ${CODE_VERSION:?required}
+    restart: unless-stopped
+    depends_on:
+      fastapi:
+        condition: service_healthy
+    environment:
+      APP_ENV: production
+      API_BASE_URL: http://fastapi:8000
+      MARKOWITZ_API_KEY: ${MARKOWITZ_API_KEY:?required}
+      DATABASE_URL: ${DATABASE_URL:?required}
+      STREAMLIT_SERVER_HEADLESS: 'true'
+      MPLCONFIGDIR: /tmp/matplotlib
+    ports:
+      - '127.0.0.1:8502:8501'
+    volumes:
+      - ${DATA_VOLUME_PATH:?required}:/apprepo/Data:ro
+    healthcheck:
+      test: [CMD, python, -c, 'import urllib.request; urllib.request.urlopen("http://localhost:8501/_stcore/health", timeout=3)']
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    networks: [backend,egress]
+networks:
+  backend:
+    internal: true
+  egress: {}
+volumes:
+  postgres_prod:
+  minio_prod:
+  mlflow_prod:
+  snapshots_prod:

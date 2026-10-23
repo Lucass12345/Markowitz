@@ -27,3 +27,24 @@ def log_to_simple_annual(mu_log_annual):
     simple = exp(mu_log_annual) - 1
     """
     return float(np.exp(mu_log_annual) - 1.0)
+
+def annualized_sharpe(sharpe_daily, periods=252):
+    """Annualized Sharpe for daily log excess returns and daily volatility."""
+    if not np.isfinite(periods) or periods <= 0:
+        raise ValueError("periods must be finite and positive")
+    return float(sharpe_daily * np.sqrt(periods))
+
+
+def portfolio_statistics(weights, mu, cov, rf_log_daily=0.0, periods=252):
+    """New metric semantics are explicit; return_annual remains the log alias."""
+    daily_return, daily_vol, daily_sharpe = port_stats_log(weights, mu, cov, rf_log_daily)
+    annual_return, annual_vol = annualize_log(daily_return, daily_vol, periods)
+    return {
+        "return_daily": daily_return, "return_log_daily": daily_return,
+        "vol_daily": daily_vol, "sharpe_daily": daily_sharpe,
+        "return_annual": float(annual_return), "return_log_annual": float(annual_return),
+        "return_simple_annual": log_to_simple_annual(annual_return),
+        "vol_annual": float(annual_vol),
+        "sharpe_annual": annualized_sharpe(daily_sharpe, periods),
+        "periods": periods, "metrics_version": 2, "return_type": "log",
+    }

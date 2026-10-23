@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import os
 from pathlib import Path
@@ -28,6 +28,8 @@ engine = create_engine(
     DATABASE_URL,
     future=True,
     pool_pre_ping=True,
+    pool_timeout=5,
+    connect_args={"connect_timeout": 5} if DATABASE_URL.startswith("postgresql") else {},
 )
 
 metadata = MetaData()
@@ -49,6 +51,31 @@ optimization_runs = Table(
     Column("weights_json", JSON, nullable=False),
     Column("frontier_json", JSON, nullable=False),
     Column("solver_message", Text, nullable=True),
+)
+
+
+optimization_run_provenance = Table(
+    "optimization_run_provenance", metadata,
+    Column("run_id", Integer, primary_key=True),
+    Column("provenance_json", JSON, nullable=False),
+    Column("tracking_json", JSON, nullable=False),
+)
+
+
+optimization_jobs = Table(
+    "optimization_jobs", metadata,
+    Column("id", String(36), primary_key=True),
+    Column("status", String(20), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("started_at", DateTime(timezone=True)),
+    Column("completed_at", DateTime(timezone=True)),
+    Column("duration_seconds", Float),
+    Column("cache_key", String(64)),
+    Column("payload_json", JSON, nullable=False),
+    Column("result_json", JSON),
+    Column("error", Text),
+    Column("technical_error", Text),
+    Column("error_status", Integer),
 )
 
 

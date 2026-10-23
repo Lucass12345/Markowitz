@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.api_client import api_headers
+
 import os
 
 import pandas as pd
@@ -48,13 +50,13 @@ def render_metric_card(label: str, value: str) -> None:
 
 
 def fetch_runs(api_base_url: str, limit: int = 200) -> list[dict]:
-    response = requests.get(f"{api_base_url}/runs", params={"limit": limit}, timeout=30)
+    response = requests.get(headers=api_headers(), url=f"{api_base_url}/runs", params={"limit": limit}, timeout=30)
     response.raise_for_status()
     return response.json()
 
 
 def fetch_run_detail(api_base_url: str, run_id: int) -> dict:
-    response = requests.get(f"{api_base_url}/runs/{run_id}", timeout=30)
+    response = requests.get(headers=api_headers(), url=f"{api_base_url}/runs/{run_id}", timeout=30)
     response.raise_for_status()
     return response.json()["run"]
 
@@ -89,7 +91,7 @@ def build_frontier_figure(frontier_df: pd.DataFrame, comparison_df: pd.DataFrame
     fig.update_layout(
         title="Frontera guardada",
         xaxis_title="Volatilidad anual",
-        yaxis_title="Retorno anual",
+        yaxis_title="Retorno logarítmico anual",
         height=600,
         margin=dict(l=20, r=20, t=60, b=20),
     )
@@ -102,7 +104,7 @@ st.title("Historial de corridas")
 render_disclaimer()
 st.caption("Historial de optimizaciones servido por el backend FastAPI.")
 
-api_base_url = st.sidebar.text_input("URL base de la API", value=API_BASE_URL)
+api_base_url = st.sidebar.text_input("URL base de la API", value=API_BASE_URL, disabled=os.getenv("APP_ENV") == "production")
 
 left_top, right_top = st.columns([0.9, 1.1])
 with left_top:
@@ -157,6 +159,8 @@ except Exception as exc:
     st.stop()
 
 metrics = run["metrics_json"]
+if metrics.get("metrics_version", 1) < 2:
+    st.info("Corrida histórica: conserva sus métricas originales. El campo Sharpe anual anterior a v2 podía contener Sharpe diario; no se recalcula este registro.")
 comparison_df = pd.DataFrame(run["comparison_json"])
 weights_df = pd.DataFrame(run["weights_json"])
 exposure_df = pd.DataFrame(run["block_exposure_json"])
@@ -165,11 +169,11 @@ targets = run["targets_json"]
 
 m1, m2, m3 = st.columns(3)
 with m1:
-    render_metric_card("Retorno anual", pretty_pct(metrics["return_annual"]))
+    render_metric_card("Retorno logarítmico anual", pretty_pct(metrics["return_annual"]))
 with m2:
     render_metric_card("Volatilidad anual", pretty_pct(metrics["vol_annual"]))
 with m3:
-    render_metric_card("Ratio de Sharpe", f"{metrics['sharpe_annual']:.3f}")
+    render_metric_card("Sharpe anualizado", f"{metrics['sharpe_annual']:.3f}")
 
 left, right = st.columns([0.95, 1.05])
 with left:

@@ -131,7 +131,7 @@ def ensure_mlp_lab_tables() -> None:
 
 def persist_mlp_lab_run(*, run_id: str, summary: dict, predictions_df: pd.DataFrame, metrics_df: pd.DataFrame, run_output_dir: str, run_model_dir: str) -> int | None:
     ensure_mlp_lab_tables()
-    merged = metrics_df.merge(predictions_df, on="ticker", how="outer")
+    merged = metrics_df.merge(predictions_df, on="ticker", how="outer", suffixes=("", "_prediction"))
     run_payload = {
         "run_id": run_id,
         "model_family": "mlp",
@@ -281,41 +281,63 @@ def get_mlp_run_tickers_df(run_id: str) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _restore_validation_evidence(df: pd.DataFrame, active: dict) -> pd.DataFrame:
+    out = df.copy()
+    directory = active.get("run_output_dir") or active.get("local_run_output_dir")
+    if not directory:
+        return out
+    for filename in ("metrics.csv", "predictions.csv"):
+        path = Path(directory) / filename
+        if not path.exists():
+            continue
+        stored = pd.read_csv(path)
+        columns = [name for name in ("dir_acc_val", "corr_val", "rmse_val", "positive_precision_val") if name in stored]
+        if not columns:
+            continue
+        stored = stored[["ticker"] + columns].rename(columns={name: f"{name}_artifact" for name in columns})
+        out = out.merge(stored, on="ticker", how="left", validate="one_to_one")
+        for name in columns:
+            artifact = out.pop(f"{name}_artifact")
+            out[name] = out[name].fillna(artifact) if name in out else artifact
+    return out
+
+
 def _apply_selection_policy(df: pd.DataFrame, selection_policy: dict | None) -> pd.DataFrame:
+    from src.models.train_returns_mlp_lab import build_composite_score
     out = df.copy()
     if out.empty:
-        out["use_for_optimizer"] = []
+        out["use_for_optimizer"] = pd.Series(dtype=bool)
         return out
-
     policy = selection_policy or {"policy_type": "all_assets"}
     policy_type = str(policy.get("policy_type", "all_assets")).strip().lower()
-    dir_acc = pd.to_numeric(out.get("dir_acc_test"), errors="coerce")
-    corr = pd.to_numeric(out.get("corr_test"), errors="coerce")
-    rmse = pd.to_numeric(out.get("rmse_test"), errors="coerce")
-    score = pd.to_numeric(out.get("score"), errors="coerce")
-
+    # Scores persisted by older runs used test metrics; always recompute from val.
+    out["score"] = build_composite_score(out)
+    evidence = out["score"].notna()
+    def numeric(name):
+        return pd.to_numeric(out[name], errors="coerce") if name in out else pd.Series(float("nan"), index=out.index)
+    direction, corr, rmse, score = numeric("dir_acc_val"), numeric("corr_val"), numeric("rmse_val"), out["score"]
     if policy_type == "all_assets":
-        mask = pd.Series(True, index=out.index)
+        mask = evidence.copy()
     elif policy_type == "dir_acc_min":
-        mask = dir_acc >= float(policy.get("dir_acc_min", 0.52))
+        mask = direction >= float(policy.get("dir_acc_min", .52))
     elif policy_type == "corr_and_rmse":
-        mask = (corr >= float(policy.get("corr_min", 0.0))) & (rmse <= float(policy.get("rmse_max", rmse.max())))
+        mask = (corr >= float(policy.get("corr_min", 0.))) & (rmse <= float(policy.get("rmse_max", rmse.max())))
     elif policy_type == "composite_min_score":
-        mask = score >= float(policy.get("min_score", 0.60))
+        mask = score >= float(policy.get("min_score", .60))
     elif policy_type == "composite_top_n":
         top_n = int(policy.get("top_n", max(1, len(out) // 3)))
-        order = score.rank(method="first", ascending=False)
-        mask = order <= top_n
+        mask = score.rank(method="first", ascending=False) <= top_n
     elif policy_type == "hybrid_quality":
-        mask = (
-            (dir_acc >= float(policy.get("dir_acc_min", 0.52)))
-            & (corr >= float(policy.get("corr_min", 0.0)))
-            & (score >= float(policy.get("min_score", 0.50)))
-        )
+        mask = ((direction >= float(policy.get("dir_acc_min", .52)))
+                & (corr >= float(policy.get("corr_min", 0.)))
+                & (score >= float(policy.get("min_score", .50))))
     else:
-        mask = pd.Series(True, index=out.index)
-
-    out["use_for_optimizer"] = mask.fillna(False).astype(bool)
+        raise ValueError(f"Unknown MLP selection policy: {policy_type}")
+    out["use_for_optimizer"] = (mask & evidence).fillna(False).astype(bool)
+    out["selection_split"] = "validation"
+    out["selection_reason"] = "validation_policy_rejected"
+    out.loc[~evidence, "selection_reason"] = "missing_validation_evidence"
+    out.loc[out.use_for_optimizer, "selection_reason"] = "validation_policy_accepted"
     return out
 
 
@@ -327,4 +349,5 @@ def load_active_mlp_predictions_df() -> pd.DataFrame:
     if df.empty:
         return df
     df["ticker"] = df["ticker"].astype(str).str.strip()
+    df = _restore_validation_evidence(df, active)
     return _apply_selection_policy(df, active.get("selection_policy_json"))

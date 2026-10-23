@@ -7,6 +7,11 @@ DATA_DIR = ROOT / "Data"
 
 
 def active_data_dir():
+    from src.publication.releases import active_release
+    released = active_release(DATA_DIR)
+    if released is not None:
+        directory, manifest = released
+        return directory / "data" / manifest["dataset_version"]
     pointer = DATA_DIR / "active_dataset.json"
     if not pointer.exists():
         return DATA_DIR
@@ -22,11 +27,15 @@ def load_returns(data_dir=None):
     df = pd.read_csv(directory / "returns.csv", index_col=0, parse_dates=True)
     df = df.sort_index()
     df.columns = df.columns.astype(str).str.strip()
+    df.attrs.update(dataset_version=directory.name, base_currency="USD", dataset_dir=str(directory))
+    if (directory.parent.parent / "release.json").exists():
+        df.attrs["release_dir"] = str(directory.parent.parent)
     return df
 
 
-def load_metadata():
-    return pd.read_csv(active_data_dir() / "assets_metadata.csv")
+def load_metadata(data_dir=None):
+    directory = Path(data_dir) if data_dir is not None else active_data_dir()
+    return pd.read_csv(directory / "assets_metadata.csv")
 
 
 def load_prices():

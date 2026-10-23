@@ -55,7 +55,7 @@ def plot_mode_result(
 
     ax.set_title(f"Efficient Frontier - {model_type}")
     ax.set_xlabel("Annual Volatility")
-    ax.set_ylabel("Annual Return")
+    ax.set_ylabel("Annual log return")
     ax.grid(True)
     ax.legend()
 

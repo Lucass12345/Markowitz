@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import json
 from pathlib import Path
 import sys
 from typing import Any
@@ -15,6 +16,7 @@ if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))
 
 from app.db import init_db
+from app.api_client import api_headers
 
 st.set_page_config(
     page_title="Optimizador Markowitz",
@@ -23,14 +25,6 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-BLOCKS = ["AR", "US", "FUNDS_EQUITY", "FUNDS_BONDS", "GOLD"]
-DEFAULT_TARGETS = {
-    "AR": 0.20,
-    "US": 0.50,
-    "FUNDS_EQUITY": 0.10,
-    "FUNDS_BONDS": 0.10,
-    "GOLD": 0.10,
-}
 MODES = ["classic", "ai_returns", "ai_returns_lstm", "ai_volatility"]
 MODE_LABELS = {
     "classic": "Markowitz clásico",
@@ -143,11 +137,16 @@ def build_frontier_figure(result: dict) -> go.Figure:
                 x=frontier_df["vol_annual"],
                 y=frontier_df["return_annual"],
                 mode="lines",
-                name="Frontera eficiente",
+                name="Frontera clásica (long-only, sin bloques ni tope)",
                 line=dict(width=3),
                 hovertemplate="Volatilidad: %{x:.2%}<br>Retorno: %{y:.2%}<extra></extra>",
             )
         )
+
+    constrained = pd.DataFrame(result.get("constrained_frontier", {}).get("points", []))
+    if not constrained.empty:
+        fig.add_trace(go.Scatter(x=constrained.vol_annual, y=constrained.return_log_annual,
+                                mode="lines", name="Frontera con bloques y tope", line=dict(width=3, dash="dash")))
 
     fig.add_trace(
         go.Scatter(
@@ -191,7 +190,7 @@ def build_frontier_figure(result: dict) -> go.Figure:
     fig.update_layout(
         title="Frontera eficiente y selección de cartera",
         xaxis_title="Volatilidad anual",
-        yaxis_title="Retorno anual",
+        yaxis_title="Retorno logarítmico anual",
         height=620,
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1.0),
         margin=dict(l=20, r=20, t=70, b=20),
@@ -250,9 +249,9 @@ def build_block_exposure_chart(exposure_df: pd.DataFrame) -> go.Figure:
     return fig
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, ttl=30)
 def check_api_health(api_base_url: str) -> dict:
-    response = requests.get(f"{api_base_url}/health", timeout=15)
+    response = requests.get(headers=api_headers(), url=f"{api_base_url}/health", timeout=15)
     response.raise_for_status()
     return response.json()
 
@@ -265,6 +264,7 @@ def call_optimize_api(
     rf_annual_simple: float,
     n_frontier_points: int,
     run_label: str,
+    optimization_options: dict | None = None,
 ) -> dict:
     payload = {
         "model_type": model_type,
@@ -275,10 +275,11 @@ def call_optimize_api(
         "run_label": run_label,
     }
 
-    response = requests.post(
-        f"{api_base_url}/optimize",
+    payload.update(optimization_options or {})
+    response = requests.post(headers=api_headers(), url=
+        f"{api_base_url}/jobs",
         json=payload,
-        timeout=300,
+        timeout=15,
     )
 
     if not response.ok:
@@ -313,6 +314,7 @@ def sidebar_controls() -> dict:
     api_base_url = st.sidebar.text_input(
         "URL base de la API",
         value=API_BASE_URL,
+        disabled=os.getenv("APP_ENV") == "production",
         help="URL del backend FastAPI.",
     )
 
@@ -324,13 +326,27 @@ def sidebar_controls() -> dict:
     st.sidebar.info(MODE_HELP[mode])
 
     st.sidebar.markdown("### Objetivos por bloque")
+    try:
+        response = requests.get(headers=api_headers(), url=f"{api_base_url}/optimize/metadata", timeout=10)
+        response.raise_for_status()
+        metadata = response.json()
+        targets_default = metadata["default_targets"]
+        st.sidebar.caption(f"Dataset: {metadata['dataset_version']} · Activos por bloque: {metadata['blocks']}")
+        if st.sidebar.checkbox("Configuración histórica de cinco bloques", value=False):
+            targets_default = metadata["legacy_targets"]
+    except (requests.RequestException, ValueError, KeyError):
+        from src.config import block_configuration
+        from src.data.load_data import load_metadata
+        targets_default = block_configuration(load_metadata())["default_targets"]
+        st.sidebar.warning("Metadata local: no se pudo consultar la API.")
     raw_targets = {}
-    for block in BLOCKS:
+    for block in targets_default:
         raw_targets[block] = st.sidebar.number_input(
             f"{block}",
             min_value=0.0,
             max_value=1.0,
-            value=float(DEFAULT_TARGETS[block]),
+            value=float(targets_default[block]),
+            key=f"target_{block}",
             step=0.01,
             format="%.2f",
         )
@@ -361,6 +377,17 @@ def sidebar_controls() -> dict:
     )
     n_frontier_points = st.sidebar.slider("Puntos de la frontera", 30, 200, 80, 10)
 
+    with st.sidebar.expander("Calidad de datos y predicciones"):
+        covariance_estimator = st.selectbox("Estimador de covarianza", [None, "historical", "ledoit_wolf", "gjr_garch"],
+                                            format_func=lambda x: x or "Predeterminado del modo")
+        lstm_direction_min = st.number_input("Dirección mínima LSTM (validación, >)", min_value=0., max_value=1., value=.52)
+        lstm_amplitude_min = st.number_input("Amplitud mínima LSTM (validación, >)", min_value=0., value=.15)
+        min_history = st.number_input("Observaciones mínimas por activo", min_value=2, value=252)
+        min_overlap = st.number_input("Observaciones mínimas por par", min_value=2, value=126)
+        prediction_fallback = st.selectbox("Predicción faltante o inválida", ["historical", "required"],
+                                            format_func=lambda x: "Usar estimación histórica" if x == "historical" else "Exigir señal IA para todos")
+        max_prediction_age_days = st.number_input("Antigüedad máxima respecto del corte (días)", min_value=0, value=7)
+
     run_label = st.sidebar.text_input(
         "Etiqueta de corrida",
         value=f"{mode}_streamlit_run",
@@ -379,10 +406,14 @@ def sidebar_controls() -> dict:
         "Correr optimización",
         type="primary",
         use_container_width=True,
-        disabled=invalid_manual_targets,
+        disabled=invalid_manual_targets or bool(st.session_state.get("pending_job_id")),
     )
 
     return {
+        "optimization_options": {"min_history": int(min_history), "min_overlap": int(min_overlap),
+                                 "prediction_fallback": prediction_fallback, "max_prediction_age_days": int(max_prediction_age_days),
+                                 "covariance_estimator": covariance_estimator, "lstm_direction_min": lstm_direction_min,
+                                 "lstm_amplitude_min": lstm_amplitude_min},
         "api_base_url": api_base_url,
         "mode": mode,
         "targets": targets,
@@ -398,6 +429,32 @@ def sidebar_controls() -> dict:
     }
 
 
+@st.fragment(run_every="2s")
+def poll_optimization_job(api_base_url):
+    job_id = st.session_state.get("pending_job_id")
+    if not job_id:
+        return
+    try:
+        response = requests.get(headers=api_headers(), url=f"{api_base_url}/jobs/{job_id}", timeout=10)
+        response.raise_for_status()
+        job = response.json()
+    except requests.RequestException as exc:
+        st.warning(f"No se pudo consultar el trabajo {job_id}: {exc}. Se reintentará.")
+        return
+    st.info(f"Trabajo {job_id}: {job['status']}")
+    if job["status"] == "failed":
+        st.session_state["last_job_error"] = job.get("error", "Falló el trabajo. Podés volver a enviarlo.")
+        del st.session_state["pending_job_id"]
+        st.rerun()
+    elif job["status"] == "completed":
+        result = job["result_json"]
+        st.session_state.pop("last_job_error", None)
+        st.session_state.update(last_api_response=result, last_result=result["result"], last_run_id=result.get("run_id"),
+                                last_mlflow_run_id=result.get("mlflow_run_id"), last_mlflow_error=result.get("mlflow_error"))
+        del st.session_state["pending_job_id"]
+        st.rerun()
+
+
 def main() -> None:
     init_db()
     inject_css()
@@ -407,6 +464,8 @@ def main() -> None:
     st.caption("Optimización de carteras con retornos expresados en USD. Las cotizaciones en ARS se convierten con CCL histórico.")
 
     controls = sidebar_controls()
+    if st.session_state.get("last_job_error"):
+        st.error(st.session_state["last_job_error"])
 
     top_health_left, top_health_right = st.columns([1, 2])
     with top_health_left:
@@ -449,6 +508,9 @@ def main() -> None:
             "Los pesos por bloque no suman 100%. Corregilos o activá la normalización automática para poder correr la optimización."
         )
 
+    if st.session_state.get("pending_job_id"):
+        poll_optimization_job(controls["api_base_url"])
+
     if controls["run_clicked"]:
         try:
             with st.spinner("Llamando a FastAPI /optimize ..."):
@@ -460,14 +522,11 @@ def main() -> None:
                     rf_annual_simple=float(controls["rf_annual_simple"]),
                     n_frontier_points=int(controls["n_frontier_points"]),
                     run_label=controls["run_label"],
+                    optimization_options=controls["optimization_options"],
                 )
 
-            st.session_state["last_api_response"] = api_response
-            st.session_state["last_result"] = api_response["result"]
-            st.session_state["last_run_id"] = api_response.get("run_id")
-            st.session_state["last_mlflow_run_id"] = api_response.get("mlflow_run_id")
-            st.session_state["last_mlflow_error"] = api_response.get("mlflow_error")
-            st.success("La optimización finalizó correctamente.")
+            st.session_state["pending_job_id"] = api_response["id"]
+            st.rerun()
 
         except Exception as exc:
             st.error(f"La optimización falló: {exc}")
@@ -488,19 +547,40 @@ def main() -> None:
         mlflow_error = st.session_state.get("last_mlflow_error")
         if mlflow_error:
             st.warning(f"MLflow: {mlflow_error}")
+        elif st.session_state.get("last_mlflow_run_id"):
+            st.success("MLflow registrado")
         else:
-            st.success("Registro en MLflow OK")
+            st.info("MLflow sin registro confirmado")
+
+    with st.expander("Trazabilidad y estado de sincronización"):
+        st.json(result.get("provenance", {}))
+        st.json(result.get("tracking", {"status": "not_recorded"}))
 
     block_stats = result["blocks"]["stats"]
     m1, m2, m3 = st.columns(3)
     with m1:
-        render_metric_card("Retorno anual", pretty_pct(block_stats["return_annual"]))
+        render_metric_card("Retorno logarítmico anual", pretty_pct(block_stats["return_annual"]))
     with m2:
         render_metric_card("Volatilidad anual", pretty_pct(block_stats["vol_annual"]))
     with m3:
-        render_metric_card("Ratio de Sharpe", f"{block_stats['sharpe_annual']:.3f}")
+        render_metric_card("Sharpe anualizado", f"{block_stats['sharpe_annual']:.3f}")
 
     st.plotly_chart(build_frontier_figure(result), use_container_width=True)
+
+    with st.expander("Diagnóstico del universo, calendarios y señales"):
+        diagnostics = result.get("diagnostics", {})
+        signals = diagnostics.get("signals", diagnostics.get("risk", {}).get("signals", []))
+        if signals:
+            st.dataframe(pd.DataFrame(signals), use_container_width=True, hide_index=True)
+        st.json(diagnostics)
+
+    with st.expander("Riesgo estimado y escenarios históricos"):
+        risk = result.get("portfolio_risk", {})
+        st.caption("Ex ante: covarianza estimada. Escenarios: cartera de pesos fijos sobre historia; no son resultados realizados de esta estrategia.")
+        st.json(risk)
+        if risk.get("risk_contributions"):
+            st.dataframe(pd.DataFrame(risk["risk_contributions"]), hide_index=True, use_container_width=True)
+        st.download_button("Exportar métricas de riesgo y unidades",json.dumps(risk,indent=2),"portfolio_risk.json","application/json")
 
     st.subheader("Comparación de carteras")
     comparison_df = build_comparison_df(result)

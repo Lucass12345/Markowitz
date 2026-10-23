@@ -9,8 +9,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 import numpy as np
 from scipy.optimize import minimize
+
+from src.optimization.errors import (
+    PortfolioValidationError, ConstraintFeasibilityError, validate_targets,
+)
 
 TRADING_DAYS = 252
 
@@ -19,41 +25,100 @@ TRADING_DAYS = 252
 # Utilidades de alineación / validación
 # =========================================================
 def _as_numpy_1d(x):
-    if hasattr(x, "values"):  # pandas Series
-        return np.asarray(x.values, dtype=float)
-    return np.asarray(x, dtype=float).reshape(-1)
+    try:
+        values = np.asarray(x.values if hasattr(x, "values") else x, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise PortfolioValidationError("Expected a numeric one-dimensional portfolio vector.") from exc
+    if values.ndim != 1 or not len(values) or not np.isfinite(values).all():
+        raise PortfolioValidationError("Portfolio vectors must be nonempty, one-dimensional and finite.")
+    index = getattr(x, "index", None)
+    if index is not None and not callable(index) and not index.is_unique:
+        raise PortfolioValidationError("Portfolio vector labels must be unique.")
+    return values
 
 
 def _as_numpy_2d(x):
-    if hasattr(x, "values"):  # pandas DataFrame
-        return np.asarray(x.values, dtype=float)
-    return np.asarray(x, dtype=float)
+    if hasattr(x, "columns"):
+        if not x.index.is_unique or not x.columns.is_unique:
+            raise PortfolioValidationError("Covariance row and column labels must be unique.")
+        if set(x.index) != set(x.columns):
+            raise PortfolioValidationError("Covariance row and column labels must match.")
+        x = x.loc[x.index, x.index]
+    try:
+        values = np.asarray(x.values if hasattr(x, "values") else x, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise PortfolioValidationError("Covariance must be a numeric square matrix.") from exc
+    if values.ndim != 2 or not len(values) or values.shape[0] != values.shape[1] or not np.isfinite(values).all():
+        raise PortfolioValidationError("Covariance must be nonempty, square and finite.")
+    if not np.allclose(values, values.T, rtol=1e-8, atol=1e-12):
+        raise PortfolioValidationError("Covariance must be symmetric.")
+    return values
 
 
 def _align_mu_sigma(mean_returns, cov_matrix):
-    """
-    Si vienen pandas, alinea cov_matrix al orden de mean_returns.index.
-    Si vienen numpy, no hace nada.
-    """
-    if hasattr(mean_returns, "index") and hasattr(cov_matrix, "loc"):
-        cov_matrix = cov_matrix.loc[mean_returns.index, mean_returns.index]
+    mu = _as_numpy_1d(mean_returns)
+    sigma = _as_numpy_2d(cov_matrix)
+    if sigma.shape != (len(mu), len(mu)):
+        raise PortfolioValidationError("Mean returns and covariance dimensions must match.")
+    index = getattr(mean_returns, "index", None)
+    if index is not None and not callable(index) and hasattr(cov_matrix, "loc"):
+        if set(index) != set(cov_matrix.index):
+            raise PortfolioValidationError("Mean-return and covariance labels must match.")
+        cov_matrix = cov_matrix.loc[index, index]
     return mean_returns, cov_matrix
 
 
 def _check_block_targets(block_targets, blocks, tol=1e-9):
-    tot = float(sum(block_targets.values()))
-    if abs(tot - 1.0) > tol:
-        raise ValueError(f"block_targets must sum to 1.0, got {tot}")
-    for bname in block_targets:
-        if bname not in blocks:
-            raise KeyError(f"block '{bname}' not in blocks dict")
+    validate_targets(block_targets, tol=tol)
+    if not isinstance(blocks, Mapping):
+        raise ConstraintFeasibilityError("Blocks must be a mapping of names to asset indices.")
+    missing = set(block_targets) - set(blocks)
+    if missing:
+        raise ConstraintFeasibilityError(f"Missing block definitions: {sorted(missing)}.")
 
 
-def rf_simple_annual_to_log_daily(rf_simple_annual: float) -> float:
+def validate_block_feasibility(n, blocks, block_targets, max_weight=1., tol=1e-9):
+    """Sufficient capacity checks for disjoint, long-only block allocations."""
+    _check_block_targets(block_targets, blocks, tol)
+    if not isinstance(n, (int, np.integer)) or isinstance(n, bool) or n <= 0:
+        raise ConstraintFeasibilityError("The optimizer requires at least one asset.")
+    try:
+        cap = float(max_weight)
+    except (TypeError, ValueError) as exc:
+        raise ConstraintFeasibilityError("max_weight must be finite and in (0, 1].") from exc
+    if not np.isfinite(cap) or not 0 < cap <= 1:
+        raise ConstraintFeasibilityError("max_weight must be finite and in (0, 1].")
+    seen = set()
+    for name, indices in blocks.items():
+        if isinstance(indices, (str, bytes)) or not hasattr(indices, "__len__"):
+            raise ConstraintFeasibilityError(f"Indices for block {name} must be an integer sequence.")
+        try:
+            indices = list(indices)
+        except TypeError as exc:
+            raise ConstraintFeasibilityError(f"Indices for block {name} must be an integer sequence.") from exc
+        current = set()
+        for index in indices:
+            if not isinstance(index, (int, np.integer)) or isinstance(index, bool) or not 0 <= index < n:
+                raise ConstraintFeasibilityError(f"Block {name} has an invalid asset index: {index}.")
+            if index in current or index in seen:
+                raise ConstraintFeasibilityError("Block indices must be unique and blocks must not overlap.")
+            current.add(index)
+        seen.update(current)
+    if n * cap < 1 - tol:
+        raise ConstraintFeasibilityError(f"Global capacity is {n * cap:g}; {n} assets at max_weight={cap:g} cannot sum to 1.")
+    for name, target in block_targets.items():
+        count = len(blocks[name])
+        if target > 0 and count == 0:
+            raise ConstraintFeasibilityError(f"Block {name} has target {target:g} but no available assets.")
+        if target > count * cap + tol:
+            raise ConstraintFeasibilityError(f"Block {name} target {target:g} exceeds capacity {count * cap:g} ({count} assets × {cap:g}).")
+
+
+def rf_simple_annual_to_log_daily(rf_simple_annual: float, periods: int = TRADING_DAYS) -> float:
     """
     Convierte rf simple anual -> log daily (consistente con log returns diarios).
     """
-    return float(np.log1p(rf_simple_annual) / TRADING_DAYS)
+    return float(np.log1p(rf_simple_annual) / periods)
 
 
 # =========================================================
@@ -151,23 +216,21 @@ def _init_w0_from_block_targets(n, blocks, block_targets):
     for bname, idx in blocks.items():
         t = float(block_targets.get(bname, 0.0))
         if len(idx) > 0:
-            w0[idx] = t / len(idx)
+            w0[list(idx)] = t / len(idx)
     return w0
 
 
-def _block_constraints(blocks, block_targets):
-    """
-    Constraints:
-      - sum(w)=1
-      - sum(w[idx_block]) = target_block (para cada bloque targeteado)
-    """
-    cons = [{"type": "eq", "fun": lambda w: np.sum(w) - 1.0}]
-    for bname, target in block_targets.items():
-        idx = blocks[bname]
-        cons.append({
-            "type": "eq",
-            "fun": lambda w, idx=idx, t=float(target): np.sum(w[idx]) - t
-        })
+def _block_constraints(blocks, block_targets, n=None):
+    """Keep independent equalities and skip empty zero-target blocks."""
+    active = [(name, list(blocks[name]), float(target))
+              for name, target in block_targets.items() if len(blocks[name])]
+    covered = [index for _, indices, _ in active for index in indices]
+    full_partition = (n is not None and len(covered) == n and len(set(covered)) == n)
+    # With a full partition, block equalities already imply the budget. Retain
+    # the budget when OTHER/unassigned assets exist so they cannot gain weight.
+    cons = [] if full_partition else [{"type": "eq", "fun": lambda w: np.sum(w) - 1.}]
+    for _, indices, target in active:
+        cons.append({"type": "eq", "fun": lambda w, idx=indices, t=target: np.sum(w[idx]) - t})
     return cons
 
 
@@ -186,13 +249,14 @@ def min_variance_with_blocks(cov_matrix, blocks, block_targets, max_weight=1.0):
 
     Sigma = _as_numpy_2d(cov_matrix)
     n = Sigma.shape[0]
+    validate_block_feasibility(n, blocks, block_targets, max_weight)
 
     def port_var(w):
         return float(w.T @ Sigma @ w)
 
     bounds = tuple((0.0, float(max_weight)) for _ in range(n))
     w0 = _init_w0_from_block_targets(n, blocks, block_targets)
-    constraints = _block_constraints(blocks, block_targets)
+    constraints = _block_constraints(blocks, block_targets, n=n)
 
     res = minimize(
         port_var,
@@ -219,6 +283,7 @@ def extreme_return_with_blocks(mean_returns, blocks, block_targets, maximize=Tru
 
     mu = _as_numpy_1d(mean_returns)
     n = len(mu)
+    validate_block_feasibility(n, blocks, block_targets, max_weight)
 
     sign = -1.0 if maximize else 1.0
 
@@ -227,7 +292,7 @@ def extreme_return_with_blocks(mean_returns, blocks, block_targets, maximize=Tru
 
     bounds = tuple((0.0, float(max_weight)) for _ in range(n))
     w0 = _init_w0_from_block_targets(n, blocks, block_targets)
-    constraints = _block_constraints(blocks, block_targets)
+    constraints = _block_constraints(blocks, block_targets, n=n)
 
     res = minimize(
         obj,
@@ -261,9 +326,11 @@ def min_variance_with_blocks_min_return(
     """
     _check_block_targets(block_targets, blocks)
 
+    mean_returns, cov_matrix = _align_mu_sigma(mean_returns, cov_matrix)
     mu = _as_numpy_1d(mean_returns)
     Sigma = _as_numpy_2d(cov_matrix)
     n = len(mu)
+    validate_block_feasibility(n, blocks, block_targets, max_weight)
 
     def portfolio_var(w):
         return float(w.T @ Sigma @ w)
@@ -271,7 +338,7 @@ def min_variance_with_blocks_min_return(
     w0 = _init_w0_from_block_targets(n, blocks, block_targets)
     bounds = tuple((0.0, float(max_weight)) for _ in range(n))
 
-    constraints = _block_constraints(blocks, block_targets)
+    constraints = _block_constraints(blocks, block_targets, n=n)
     constraints.append({
         "type": "ineq",
         "fun": lambda w, tr=float(target_return): float(w @ mu) - tr
@@ -302,9 +369,11 @@ def min_variance_with_blocks_return_target(
     """
     _check_block_targets(block_targets, blocks)
 
+    mean_returns, cov_matrix = _align_mu_sigma(mean_returns, cov_matrix)
     mu = _as_numpy_1d(mean_returns)
     Sigma = _as_numpy_2d(cov_matrix)
     n = len(mu)
+    validate_block_feasibility(n, blocks, block_targets, max_weight)
 
     def portfolio_var(w):
         return float(w.T @ Sigma @ w)
@@ -312,7 +381,7 @@ def min_variance_with_blocks_return_target(
     w0 = _init_w0_from_block_targets(n, blocks, block_targets)
     bounds = tuple((0.0, float(max_weight)) for _ in range(n))
 
-    constraints = _block_constraints(blocks, block_targets)
+    constraints = _block_constraints(blocks, block_targets, n=n)
     constraints.append({
         "type": "eq",
         "fun": lambda w, tr=float(target_return): float(w @ mu) - tr
@@ -359,6 +428,7 @@ def max_sharpe_with_blocks(
 
     mu = _as_numpy_1d(mean_returns)
     Sigma = _as_numpy_2d(cov_matrix)
+    validate_block_feasibility(len(mu), blocks, block_targets, max_weight)
 
     def sharpe_of(w):
         w = np.asarray(w, dtype=float)
@@ -456,6 +526,7 @@ def max_sharpe_with_blocks_direct(
     mu = _as_numpy_1d(mean_returns)
     Sigma = _as_numpy_2d(cov_matrix)
     n = len(mu)
+    validate_block_feasibility(n, blocks, block_targets, max_weight)
 
     def obj(w):
         var = float(w.T @ Sigma @ w)
@@ -467,7 +538,7 @@ def max_sharpe_with_blocks_direct(
 
     bounds = tuple((0.0, float(max_weight)) for _ in range(n))
     w0 = _init_w0_from_block_targets(n, blocks, block_targets)
-    constraints = _block_constraints(blocks, block_targets)
+    constraints = _block_constraints(blocks, block_targets, n=n)
 
     res = minimize(
         obj,

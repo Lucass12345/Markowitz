@@ -7,3 +7,12 @@ outputs/model_search*/
 outputs/lstm_lab/runs/
 models_artifacts/returns_lstm/runs/
 .pytest_cache/
+
+outputs/backtesting/
+storage/optimization_snapshots/
+Data/releases/
+Data/active_release.json
+
+.env.production
+backups/
+.ruff_cache/

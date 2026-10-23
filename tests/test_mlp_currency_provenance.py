@@ -147,3 +147,16 @@ def test_mlp_lab_persists_pinned_usd_provenance(usd_dataset, tmp_path, monkeypat
     config = json.loads((Path(result["run_output_dir"]) / "config.json").read_text())
     assert config["dataset_version"] == snapshot.name and config["base_currency"] == "USD"
     assert persisted[0]["summary"]["dataset_version"] == snapshot.name
+
+
+def test_legacy_merge_keeps_return_and_volatility_identity_unambiguous(usd_dataset,tmp_path,monkeypatch):
+    _,snapshot=usd_dataset
+    monkeypatch.setattr(predict,'OUTPUT_DIR',tmp_path)
+    common={'ticker':['NEW'],'dataset_version':[snapshot.name],'base_currency':['USD'],'as_of':['2024-01-01']}
+    pd.DataFrame({**common,'mu_pred':[.001],'model_run_id':['return-run'],'prediction_units':['daily_log_return']}).to_csv(tmp_path/'return_predictions.csv',index=False)
+    pd.DataFrame({**common,'vol_pred':[.02],'model_run_id':['volatility-run'],'prediction_units':['daily_log_volatility']}).to_csv(tmp_path/'volatility_predictions.csv',index=False)
+    result=predict.build_prediction_table()
+    assert result.model_run_id.iloc[0]=='return-run'
+    assert result.volatility_model_run_id.iloc[0]=='volatility-run'
+    assert result.prediction_units.iloc[0]=='daily_log_return'
+    assert not any(name.endswith(('_x','_y')) for name in result)

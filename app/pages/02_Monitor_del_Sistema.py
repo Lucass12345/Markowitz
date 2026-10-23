@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.api_client import api_headers_for
+
 import os
 from typing import Any
 
@@ -44,7 +46,7 @@ def render_metric_card(label: str, value: str, color: str = "#1e293b") -> None:
 
 def safe_get_json(url: str, timeout: int = 15) -> tuple[bool, Any]:
     try:
-        response = requests.get(url, timeout=timeout)
+        response = requests.get(headers=api_headers_for(url, [API_BROWSER_URL, API_INTERNAL_URL]), url=url, timeout=timeout)
         response.raise_for_status()
         return True, response.json()
     except Exception as exc:
@@ -53,7 +55,7 @@ def safe_get_json(url: str, timeout: int = 15) -> tuple[bool, Any]:
 
 def safe_get_status(url: str, timeout: int = 10) -> tuple[bool, int | None, str | None]:
     try:
-        response = requests.get(url, timeout=timeout)
+        response = requests.get(headers=api_headers_for(url, [API_BROWSER_URL, API_INTERNAL_URL]), url=url, timeout=timeout)
         return True, response.status_code, None
     except Exception as exc:
         return False, None, str(exc)
