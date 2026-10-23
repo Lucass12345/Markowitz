@@ -25,8 +25,9 @@ def load_returns(data_dir=None):
     return df
 
 
-def load_metadata():
-    return pd.read_csv(active_data_dir() / "assets_metadata.csv")
+def load_metadata(data_dir=None):
+    directory = Path(data_dir) if data_dir is not None else active_data_dir()
+    return pd.read_csv(directory / "assets_metadata.csv")
 
 
 def load_prices():

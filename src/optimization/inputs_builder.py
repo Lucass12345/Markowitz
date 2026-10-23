@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 
 from src.data.load_data import assert_current_dataset
+from src.optimization.covariance import RiskConfig, estimate_historical_risk, regularize_covariance
 from src.optimization.lstm_lab_loader import load_active_lstm_predictions_df
 from src.optimization.mlp_lab_loader import load_active_mlp_predictions
 
@@ -74,19 +75,25 @@ def _build_ai_returns_from_active_mlp(returns: pd.DataFrame):
     return mu.loc[common], cov.loc[common, common], common
 
 
-def build_model_inputs(model_type: str, returns: pd.DataFrame):
+def build_model_inputs(model_type: str, returns: pd.DataFrame, risk_config: RiskConfig | None = None):
     model_type = str(model_type).strip().lower()
     returns = returns.copy()
     returns.columns = returns.columns.astype(str).str.strip()
+    risk_config = risk_config or RiskConfig()
+    returns, historical_cov, diagnostics = estimate_historical_risk(returns, risk_config)
+
+    def finish(mu, cov, tickers):
+        cov, final_diagnostics = regularize_covariance(cov, risk_config)
+        mu.attrs["input_diagnostics"] = {**diagnostics, "final_covariance": final_diagnostics}
+        return mu, cov, tickers
 
     if model_type == "classic":
         mu = returns.mean()
-        cov = returns.cov()
-        return mu, cov, list(mu.index)
+        return finish(mu, historical_cov, list(mu.index))
 
     if model_type == "ai_returns":
         try:
-            return _build_ai_returns_from_active_mlp(returns)
+            return finish(*_build_ai_returns_from_active_mlp(returns))
         except Exception:
             preds = load_predictions("predictions.csv").set_index("ticker")
             if "mu_pred" not in preds.columns:
@@ -97,7 +104,7 @@ def build_model_inputs(model_type: str, returns: pd.DataFrame):
             returns_sub = returns[common].copy()
             mu = preds.loc[common, "mu_pred"].astype(float)
             cov = returns_sub.cov()
-            return mu, cov, common
+            return finish(mu, cov, common)
 
     if model_type == "ai_returns_lstm":
         preds = load_active_lstm_predictions_df().copy()
@@ -125,7 +132,7 @@ def build_model_inputs(model_type: str, returns: pd.DataFrame):
             good_mask &= preds["use_for_optimizer"].fillna(False).astype(str).str.lower().eq("true")
         mu.loc[good_mask.index[good_mask]] = preds.loc[good_mask, "mu_pred"].astype(float)
         cov = returns_sub.cov()
-        return mu.loc[common], cov.loc[common, common], common
+        return finish(mu.loc[common], cov.loc[common, common], common)
 
     if model_type == "ai_volatility":
         preds = load_volatility_predictions("volatility_predictions.csv").set_index("ticker")
@@ -136,6 +143,6 @@ def build_model_inputs(model_type: str, returns: pd.DataFrame):
         mu = returns_sub.mean()
         pred_vol = preds.loc[common, "vol_pred"].astype(float)
         cov = _build_ai_vol_cov(returns_sub, pred_vol)
-        return mu.loc[common], cov.loc[common, common], common
+        return finish(mu.loc[common], cov.loc[common, common], common)
 
     raise ValueError(f"model_type inválido: {model_type}. Usá 'classic', 'ai_returns', 'ai_returns_lstm' o 'ai_volatility'.")

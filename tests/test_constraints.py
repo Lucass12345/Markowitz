@@ -108,8 +108,8 @@ def test_capacity_checked_after_model_filtering_before_frontier(monkeypatch):
     from src.optimization import optimizer_service as service
     returns = pd.DataFrame({"A": [.01, .02], "B": [.02, .03]})
     meta = pd.DataFrame({"ticker": ["A", "B"], "block": ["X", "X"]})
-    monkeypatch.setattr(service, "load_returns", lambda: returns)
-    monkeypatch.setattr(service, "load_metadata", lambda: meta)
+    monkeypatch.setattr(service, "load_returns", lambda **kwargs: returns)
+    monkeypatch.setattr(service, "load_metadata", lambda **kwargs: meta)
     monkeypatch.setattr(service, "build_model_inputs", lambda **kwargs: (pd.Series([.01], index=["A"]), pd.DataFrame([[.01]], index=["A"], columns=["A"]), ["A"]))
     monkeypatch.setattr(service, "run_frontier", lambda **kwargs: pytest.fail("Infeasible request reached frontier"))
     with pytest.raises(ConstraintFeasibilityError):

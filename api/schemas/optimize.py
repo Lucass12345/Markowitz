@@ -15,6 +15,10 @@ class OptimizeRequest(BaseModel):
     max_weight: float = Field(0.15, gt=0.0, le=1.0)
     rf_annual_simple: float = Field(0.0, ge=0.0, le=1.0)
     n_frontier_points: int = Field(80, ge=10, le=500)
+    min_history: int = Field(252, ge=2)
+    min_overlap: int = Field(126, ge=2)
+    eigenvalue_floor: float = Field(1e-8, gt=0, lt=1)
+    max_psd_adjustment: float = Field(1.0, ge=0, allow_inf_nan=False)
     run_label: str | None = Field(default=None)
 
     @model_validator(mode="after")
