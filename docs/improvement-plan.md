@@ -73,3 +73,23 @@ CI agregado para pruebas offline, lint de errores y compilación. Verificación 
 una optimización sintética completa y comprueba HTTP 422 ante capacidad insuficiente.
 Se reemplazó un módulo de servicio obsoleto que ejecutaba nombres indefinidos al importar
 por una reexportación compatible. JSON convierte NaN/infinito a null en API, SQL y snapshots.
+
+## P2 y cierre
+
+- Riesgo: HHI, contribuciones marginales/porcentuales, VaR/ES históricos, drawdown,
+  volatilidades y correlaciones observadas, con unidades/horizontes y tipo de medición.
+- Publicación: bundles aislados con checksums y controles de validación, import/pull
+  autenticado de Actions, activación atómica y rollback. Ver `publication.md`.
+- Jobs: cola interna limitada, estados persistidos, errores recuperables y caché clásica
+  dependiente de contenido/configuración/código. Ver `jobs.md` y su límite de un worker.
+- Producción separada: API key/roles, CORS explícito, liveness/readiness, logs JSON,
+  imágenes con versiones, MLflow instalado en build y volúmenes. Ver `production.md`.
+- Diagnóstico desde el backend: dataset, señales y sus motivos, fechas y modelos, servicios
+  y última sincronización registrada. README corregido: se usa validación, no test; los
+  modelos no tienen superioridad financiera declarada. AppTest ejecuta la UI principal
+  y la página de diagnóstico, incluido el envío/consulta de un trabajo.
+
+La suite ampliada pasó **155 pruebas** y lint/compilación. Compose de desarrollo y producción
+validan la configuración. Docker no pudo construir/arrancar por permiso denegado al daemon;
+no se verificaron servicios externos reales, un workflow remoto ni un despliegue cloud.
+Las pruebas de SQL usan SQLite y los contratos remotos emplean dobles.

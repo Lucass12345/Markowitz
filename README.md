@@ -1,5 +1,7 @@
 # Optimizador Markowitz
 
+Guías vigentes: [datos y modelos USD](docs/dynamic-models.md), [correcciones y compatibilidad](docs/improvement-plan.md), [backtesting](docs/backtesting.md), [publicación y rollback](docs/publication.md), [trabajos asíncronos](docs/jobs.md) y [producción](docs/production.md). La página **Diagnóstico** muestra el estado observado del backend.
+
 ## 1. Resumen ejecutivo
 
 Este proyecto implementa una **plataforma integral de optimización de carteras** basada en el marco de **Markowitz con restricciones por bloques**, extendida con señales de inteligencia artificial para dos usos distintos:
@@ -11,7 +13,7 @@ El sistema no reemplaza la lógica de Markowitz; la arquitectura está pensada p
 
 - **Markowitz clásico**: usa media histórica y covarianza histórica.
 - **Markowitz con retornos IA (MLP)**: reemplaza parcial o totalmente el vector de retornos esperados.
-- **Markowitz con retornos IA (LSTM)**: reemplaza parcialmente el vector de retornos esperados usando el run activo del laboratorio LSTM.
+- **Markowitz con retornos IA (LSTM)**: reemplaza parcialmente el vector de retornos esperados usando el release activo o la corrida seleccionada del laboratorio LSTM.
 - **Markowitz con volatilidad IA (GJR-GARCH)**: mantiene el retorno esperado histórico, pero reemplaza la estructura de volatilidad diagonal usando volatilidades predichas.
 
 La plataforma está montada sobre:
@@ -49,25 +51,21 @@ El objetivo académico correcto no es presentar el proyecto como “IA reemplaza
 
 ### 3.1 Fuente base operativa
 
-La fuente de verdad del sistema es:
+`src/data/load_data.py` resuelve un release activo (`Data/active_release.json`),
+la versión dinámica (`Data/active_dataset.json`) o los CSV históricos de `Data/`.
+Cada optimización fija ese directorio una vez. Los snapshots conservan retornos USD,
+metadata, fecha de corte y versión. El CSV inicial es un universo histórico reproducible,
+no un límite al universo Yahoo. `Data/fx_CCL.csv` conserva una fuente histórica de CCL.
 
-- `Data/returns.csv`
-- `Data/assets_metadata.csv`
+### 3.2 Tamaño del dataset histórico versionado
 
-Adicionalmente existen:
-
-- `Data/prices.csv`
-- `Data/fx_CCL.csv`
-
-### 3.2 Tamaño del dataset operativo actual
-
-En la snapshot actual del repo:
+En los CSV históricos versionados (no necesariamente el dataset activo):
 
 - **2061 observaciones diarias**
 - **40 activos**
 - rango temporal: **2018-01-03 → 2025-12-31**
 
-### 3.3 Universo de activos actual
+### 3.3 Universo de activos histórico
 
 #### Acciones argentinas (`AR`) — 15 activos
 - `ALUA.BA`
@@ -201,17 +199,17 @@ Uso exclusivo de datos historicos.
 
 **Input:**
 - `mu = returns.mean()`
-- `cov = returns.cov()`
+- covarianza por pares observados con historia y solapamiento mínimos, diagnóstico y regularización PSD
 
 **Fuente:**
-- `Data/returns.csv`
+- `load_returns()` sobre el snapshot activo
 
 **Interpretación:** benchmark y teoria financiera pura.
 
 ---
 
-### 5.2 `ai_returns` - (Descontinuado por mejor desempeño de LSTM)
-Primero intenta consumir el **run activo de MLP Lab**. Si no hay run activo o la carga falla, hace fallback a `outputs/predictions/predictions.csv`.
+### 5.2 `ai_returns` (MLP experimental)
+Primero intenta consumir el **run activo de MLP Lab**. Si no hay run activo o el servicio SQL no está disponible, hace fallback a `outputs/predictions/predictions.csv`.
 
 **Prioridad actual:**
 1. run activo de MLP Lab (`load_active_mlp_predictions()`)
@@ -227,25 +225,27 @@ Primero intenta consumir el **run activo de MLP Lab**. Si no hay run activo o la
 ---
 
 ### 5.3 `ai_returns_lstm`
-Consume el **run activo de LSTM Lab**.
-
-**Fuente:**
-- tablas del laboratorio LSTM en DB
-- rutas espejo en `outputs/lstm_lab/latest_run.json`
+Consume el bundle de serving cuando existe un release activo; en modo legacy usa
+la corrida LSTM seleccionada en SQL o las predicciones de automatización local.
+La carga valida dataset, USD, fecha y unidades antes de aplicar señales.
 
 **Lógica actual:**
-- si `dir_acc_test > 0.52`, usa `mu_pred`
-- si no, el activo vuelve a media histórica
-- la covarianza sigue siendo histórica
+- `dir_acc_val > 0.52` y amplitud de validación `> 0.15`, configurables;
+- `use_for_optimizer` conserva el filtro del productor contra baseline de validación;
+- el test nunca determina señales o hiperparámetros;
+- señal ausente/caducada/no finita: media histórica por defecto, conservando el activo;
+- política `required`: cualquier señal requerida inválida produce HTTP 422;
+- versión/moneda/unidades incompatibles: HTTP 422, sin mezclar snapshots;
+- diagnósticos por ticker conservan motivos, métricas y configuración.
 
 **Interpretación:** sustitución parcial y filtrada del vector \(\mu\).
 
 ---
 
 ### 5.4 `ai_volatility`
-Consume directamente:
-
-- `outputs/predictions/volatility_predictions.csv`
+Consume las predicciones GARCH del release fijado o, sin release,
+`outputs/predictions/volatility_predictions.csv`. Mantiene historia para señales faltantes
+y comprueba vigencia. `vol_pred` es volatilidad diaria, aunque también se exporten horizontes de cinco ruedas.
 
 **No usa `predictions.csv` para volatilidad.**
 
@@ -670,7 +670,7 @@ El optimizador tomará el run activo y solo aplicará `mu_pred` a activos con ca
 
 ---
 
-## 15.5 Flujo para `ai_returns` con MLP - (Descontinuado)
+## 15.5 Flujo para `ai_returns` con MLP - (experimental)
 
 Hoy existen dos caminos.
 
@@ -715,34 +715,30 @@ Configuración base histórica:
 - target a 1 día
 - features de lags y rolling stats
 
-## 16.3 LSTM legado / productivo
-Ubicación:
-- `models_artifacts/returns_lstm/*.pt`
+## 16.3 LSTM de producción y compatibilidad histórica
 
-Parámetros típicos históricos:
-- `seq_len=20`
-- `forecast_horizon=5`
-- `hidden_size=64`
-- `num_layers=2`
-- `dropout=0.2`
-- `epochs=80`
-- `batch_size=32`
-- `lr=0.001`
+Los checkpoints nuevos están en `models_artifacts/returns_lstm/runs/<run_id>/`
+o dentro del release. Producción usa la misma selección temporal que el laboratorio:
+secuencia 40 por defecto, horizonte 5, arquitecturas 64→64 y 120→64, ReLU/Tanh/GELU
+para la capa densa y configuraciones Adam descritas en [la guía](docs/dynamic-models.md).
+El orden de features, escaladores y configuración ganadora se guardan por ticker.
+Los checkpoints antiguos homogéneos siguen cargándose con el constructor original.
+No se impone una arquitectura ganadora para todo el universo.
 
 ## 16.4 LSTM Lab
 Ubicación de runs:
 - `outputs/lstm_lab/runs/<run_id>/`
 - `models_artifacts/returns_lstm/runs/<run_id>/`
 
-Último run identificado en esta snapshot:
+Ejemplo histórico guardado en el repositorio (el vigente se consulta en Diagnóstico):
 - `20260329_012341`
 
-## 16.5 MLP Lab - (Descontinuado)
+## 16.5 MLP Lab - (experimental)
 Ubicación de runs:
 - `outputs/mlp_lab/runs/<run_id>/`
 - `models_artifacts/returns_mlp_lab/runs/<run_id>/`
 
-Último run identificado en esta snapshot:
+Ejemplo histórico guardado en el repositorio (el vigente se consulta en Diagnóstico):
 - `20260330_003605`
 
 Estado recomendado:
@@ -784,7 +780,7 @@ Tablas principales:
 - `prediction_runs`
 - `prediction_run_tickers`
 
-### 17.3 Corridas de MLP Lab - (Descontinuado)
+### 17.3 Corridas de MLP Lab - (experimental)
 Tablas principales:
 - `mlp_prediction_runs`
 - `mlp_prediction_run_tickers`
@@ -806,7 +802,8 @@ Cada corrida disparada por FastAPI puede:
 - subir artefactos CSV a MinIO.
 
 Artefactos típicos:
-- `frontier.csv`
+- snapshot completo con datos, mu, covarianza, configuración, métricas y hashes
+- `frontier.csv` (exportaciones históricas)
 - `weights_blocks.csv`
 - `block_exposure.csv`
 - `comparison.csv`
@@ -819,7 +816,7 @@ El laboratorio LSTM además puede:
 - loguear parámetros y métricas a MLflow;
 - subir outputs y modelos a MinIO.
 
-## 18.3 MLP Lab - (Descontinuado)
+## 18.3 MLP Lab - (experimental)
 En la versión actual, el MLP Lab persiste en DB y en carpetas locales del repo, pero no tiene integración equivalente a la del LSTM Lab con MinIO/MLflow tan desarrollada.
 
 ---
@@ -905,3 +902,49 @@ Este sistema es únicamente informativo, experimental y educativo. **No constitu
 ## Dataset Yahoo Finance y validación de modelos
 
 Los precios y retornos dinámicos se unifican en **USD**; las cotizaciones en ARS se convierten mediante CCL histórico antes de calcular retornos. El universo puede elegirse desde la página **Dataset Dinámico** o con `python scripts/run_refresh_dataset.py --tickers AAPL TLT GGAL.BA --retrain`. La LSTM pronostica las próximas cinco ruedas y compara features, 64→64/120→64, activaciones y Adam mediante validación temporal purgada. GARCH agrega diagnósticos y backtest contra EWMA. [Configuración, metodología y automatización](docs/dynamic-models.md).
+
+
+## Métricas, restricciones y verificación vigentes
+
+Retornos del optimizador: logarítmicos diarios en USD. `mu_pred` LSTM es la **media
+por rueda** del horizonte de cinco ruedas; su acumulado logarítmico es `5 * mu_pred`
+y el simple equivalente `expm1(5 * mu_pred)`. No son cinco predicciones independientes.
+Sharpe diario usa tasa libre diaria; Sharpe anualizado multiplica por `sqrt(252)`.
+`return_annual` conserva el alias logarítmico; `return_log_annual` lo hace explícito y
+`return_simple_annual=expm1(return_log_annual)`. Las corridas nuevas son metrics_version=2;
+las históricas no se reescriben. Las convenciones anuales son estimaciones bajo 252 ruedas.
+
+La UI compara frontera clásica long-only sin bloques/tope con una **segunda frontera**
+que sí cumple objetivos, tope por activo, long-only y presupuesto 100%. Cada punto
+restringido conserva pesos y controles de convergencia. Los bloques proceden de
+assets_metadata.csv, admiten OTHER y nombres personalizados. Los defaults originales
+se conservan para el universo histórico; otros conjuntos reciben objetivos iniciales
+iguales entre bloques, que el usuario debe revisar junto con la capacidad de cada grupo.
+
+La política de calendario no rellena feriados. Historia mínima 252 por activo y solapamiento
+126 por par, configurables; se informan exclusiones y reparación PSD. Se puede elegir
+histórica, Ledoit-Wolf o correlación histórica con volatilidades GJR-GARCH. Shrinkage exige
+suficientes fechas conjuntas observadas y rechaza universos sin esa cobertura.
+
+El backtest informa resultados realizados ex post, costos y turnover con pesos que derivan;
+los riesgos de la pantalla de optimización son ex ante o escenarios históricos identificados.
+Una ejecución demostrativa de 15 ruedas está documentada; no prueba superioridad LSTM/GARCH.
+
+FastAPI conserva POST /optimize y agrega POST /jobs, GET /jobs/{id}, GET /diagnostics y
+liveness/readiness separadas. Streamlit consulta trabajos sin esperar todo el solver en una
+petición. Cada corrida conserva evidencia inmutable y los estados independientes de SQL,
+MLflow y MinIO. Un servicio alcanzable no confirma que sus artefactos estén sincronizados.
+GitHub Actions publica candidatos con retención de 30 días; un pull validado sobre el
+volumen de serving permite activarlos y hacer rollback. El runner no modifica el contenedor local.
+
+Validación local y CI, sin credenciales externas:
+
+```bash
+python -m pytest -q
+ruff check src api app tests --select E9,F63,F7,F82,F821
+python -m compileall -q src api app scripts
+```
+
+Ver [informe de implementación](docs/improvement-plan.md) para pruebas ejecutadas,
+migraciones aditivas y límites de verificación. Producción requiere configuración separada,
+secretos propios, TLS/SSO y comprobación real de contenedores en el entorno de destino.

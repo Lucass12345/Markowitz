@@ -5,6 +5,7 @@ import time
 import uuid
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from api.routers.diagnostics import router as diagnostics_router
 from api.routers.jobs import router as jobs_router
 from api.routers.health import router as health_router
 from api.routers.optimize import router as optimize_router
@@ -51,6 +52,7 @@ def create_app():
     app.include_router(optimize_router,prefix='/optimize',tags=['optimize'])
     app.include_router(runs_router,prefix='/runs',tags=['runs'])
     app.include_router(jobs_router,prefix='/jobs',tags=['jobs'])
+    app.include_router(diagnostics_router,prefix='/diagnostics',tags=['diagnostics'])
     return app
 
 

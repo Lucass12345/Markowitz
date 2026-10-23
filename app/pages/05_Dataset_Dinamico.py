@@ -1,4 +1,6 @@
 from datetime import date
+import os
+from types import SimpleNamespace
 from pathlib import Path
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -17,21 +19,24 @@ current = load_metadata()
 tickers = st.text_area("Tickers de Yahoo Finance (separados por espacios o comas)", ", ".join(current["ticker"]))
 start = st.date_input("Inicio del historial", value=date(2015, 1, 1))
 st.info("Moneda base: USD. ARS: precio en pesos ÷ CCL histórico. Otras monedas: cambio histórico de Yahoo. No se publica un dataset si falta un cambio o supera siete días de antigüedad.")
+if os.getenv("APP_ENV") == "production":
+    st.info("Serving monta los datos en modo lectura. Publicá un candidato desde el job de mantenimiento; ver docs/publication.md.")
+    st.dataframe(current, use_container_width=True)
+    st.stop()
 retrain = st.checkbox("Reentrenar LSTM y GARCH después de descargar", value=False)
 if st.button("Descargar y activar dataset", type="primary"):
     try:
-        with st.spinner("Descargando precios e identificación de cada activo…"):
-            manifest = refresh_dataset(tickers.replace(",", " ").split(), start=start.isoformat())
-        st.success(f"Dataset {manifest['version']} activado. Los próximos entrenamientos usarán estos datos.")
         if retrain:
-            from src.models.train_returns_lstm import train_all_return_models_lstm
-            from src.models.train_volatility import forecast_all_volatility
-            with st.spinner("Seleccionando, entrenando y validando modelos…"):
-                train_all_return_models_lstm(epochs=30)
-                forecast_all_volatility()
-            st.success("Predicciones LSTM y GARCH actualizadas para el dataset activo.")
+            from scripts.run_refresh_dataset import build_candidate
+            with st.spinner("Construyendo y validando candidato. Para trabajos extensos se recomienda el workflow o CLI de mantenimiento…"):
+                release = build_candidate(SimpleNamespace(tickers=tickers.replace(",", " ").split(), start=start.isoformat(),
+                    ccl_file=None, max_fx_age_days=7, epochs=30, min_signal_coverage=.25, candidate_only=False))
+            st.success(f"Release {release.name} activado con datos y modelos verificados.")
         else:
-            st.warning("Las predicciones anteriores deben regenerarse desde los laboratorios antes de optimizar el nuevo universo.")
+            with st.spinner("Descargando precios e identificación de cada activo…"):
+                manifest = refresh_dataset(tickers.replace(",", " ").split(), start=start.isoformat())
+            st.success(f"Dataset {manifest['version']} activado.")
+            st.warning("Reentrená las predicciones antes de usar IA sobre esta versión.")
     except Exception as exc:
         st.error(str(exc))
 st.write("Dataset activo:", str(active_data_dir()))

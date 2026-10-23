@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from app.api_client import api_headers
-
 import os
 import json
 from pathlib import Path
@@ -18,6 +16,7 @@ if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))
 
 from app.db import init_db
+from app.api_client import api_headers
 
 st.set_page_config(
     page_title="Optimizador Markowitz",
@@ -544,8 +543,14 @@ def main() -> None:
         mlflow_error = st.session_state.get("last_mlflow_error")
         if mlflow_error:
             st.warning(f"MLflow: {mlflow_error}")
+        elif st.session_state.get("last_mlflow_run_id"):
+            st.success("MLflow registrado")
         else:
-            st.success("Registro en MLflow OK")
+            st.info("MLflow sin registro confirmado")
+
+    with st.expander("Trazabilidad y estado de sincronización"):
+        st.json(result.get("provenance", {}))
+        st.json(result.get("tracking", {"status": "not_recorded"}))
 
     block_stats = result["blocks"]["stats"]
     m1, m2, m3 = st.columns(3)

@@ -104,7 +104,7 @@ st.title("Historial de corridas")
 render_disclaimer()
 st.caption("Historial de optimizaciones servido por el backend FastAPI.")
 
-api_base_url = st.sidebar.text_input("URL base de la API", value=API_BASE_URL)
+api_base_url = st.sidebar.text_input("URL base de la API", value=API_BASE_URL, disabled=os.getenv("APP_ENV") == "production")
 
 left_top, right_top = st.columns([0.9, 1.1])
 with left_top:
