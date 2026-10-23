@@ -1,3 +1,4 @@
+import hashlib
 from pathlib import Path
 import pandas as pd
 
@@ -50,6 +51,7 @@ def train_all_return_models():
 
         model_path = ARTIFACTS_DIR / f"{ticker}_mlp.joblib"
         model.save(model_path)
+        artifact_digest = hashlib.sha256(model_path.read_bytes()).hexdigest() if model_path.is_file() else None
 
         rows.append({
             "ticker": ticker,
@@ -58,6 +60,11 @@ def train_all_return_models():
             "mu_pred": pred,
             "dataset_version": dataset_dir.name,
             "base_currency": "USD",
+            "as_of": str(pd.Timestamp(X.index[-1]).date()),
+            "prediction_units": "daily_log_return",
+            "model_run_id": f"artifact_sha256:{artifact_digest}" if artifact_digest else None,
+            "use_for_optimizer": False,
+            "selection_reason": "missing_validation_evidence",
         })
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)

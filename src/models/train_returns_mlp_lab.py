@@ -151,16 +151,32 @@ def build_mlp_feature_frame(series: pd.Series, lags: int, short_window: int, lon
 def build_target(series: pd.Series, forecast_horizon: int, target_aggregation: str) -> pd.Series:
     future_steps = [series.shift(-i) for i in range(1, forecast_horizon + 1)]
     future_df = pd.concat(future_steps, axis=1)
+    complete = future_df.notna().all(axis=1)
     if target_aggregation == "sum":
-        return future_df.sum(axis=1)
-    return future_df.mean(axis=1)
+        return future_df.sum(axis=1, min_count=forecast_horizon).where(complete)
+    return future_df.mean(axis=1).where(complete)
 
 
-def temporal_split(df: pd.DataFrame, train_frac: float = 0.70, val_frac: float = 0.15):
+def temporal_split(df: pd.DataFrame, train_frac: float = 0.70, val_frac: float = 0.15, forecast_horizon: int = 1):
     n = len(df)
     train_end = int(n * train_frac)
     val_end = int(n * (train_frac + val_frac))
-    return df.iloc[:train_end].copy(), df.iloc[train_end:val_end].copy(), df.iloc[val_end:].copy()
+    if forecast_horizon < 1:
+        raise ValueError("forecast_horizon must be positive")
+    purge = forecast_horizon - 1
+    return (df.iloc[:max(0, train_end - purge)].copy(),
+            df.iloc[train_end:max(train_end, val_end - purge)].copy(),
+            df.iloc[val_end:].copy())
+
+
+def training_winsorization_bounds(series: pd.Series, train_end, quantile: float):
+    """Fit clipping limits on observed training history only, never val/test."""
+    if not 0 < quantile < .5:
+        raise ValueError("winsorize_quantile must be in (0, .5)")
+    history = series.loc[:train_end].dropna().astype(float)
+    if history.empty:
+        raise ValueError("No training history available for winsorization")
+    return float(history.quantile(quantile)), float(history.quantile(1. - quantile))
 
 
 def metric_bundle(y_true, y_pred) -> dict:
@@ -183,15 +199,27 @@ def _rank_score(series: pd.Series, higher_is_better: bool = True) -> pd.Series:
 
 
 def build_composite_score(df: pd.DataFrame) -> pd.Series:
-    mu_rank = _rank_score(df["mu_pred"], higher_is_better=True)
-    dir_rank = _rank_score(df["dir_acc_test"], higher_is_better=True)
-    corr_rank = _rank_score(df["corr_test"].fillna(0.0), higher_is_better=True)
-    rmse_rank = _rank_score(df["rmse_test"], higher_is_better=False)
-    pos_rank = _rank_score(df["positive_precision_test"].fillna(0.0), higher_is_better=True)
-    return (0.35 * mu_rank + 0.25 * dir_rank + 0.15 * corr_rank + 0.15 * rmse_rank + 0.10 * pos_rank).astype(float)
+    """Rank using validation evidence only; missing evidence is not a neutral score."""
+    columns = ["mu_pred", "dir_acc_val", "corr_val", "rmse_val", "positive_precision_val"]
+    values = pd.DataFrame({name: pd.to_numeric(df[name], errors="coerce") if name in df
+                           else pd.Series(np.nan, index=df.index) for name in columns}, index=df.index)
+    valid = pd.Series(np.isfinite(values.to_numpy()).all(axis=1), index=df.index)
+    valid &= values.dir_acc_val.between(0, 1) & values.corr_val.between(-1, 1)
+    valid &= values.rmse_val.ge(0) & values.positive_precision_val.between(0, 1)
+    out = pd.Series(np.nan, index=df.index, dtype=float)
+    selected = values.loc[valid]
+    if not selected.empty:
+        out.loc[valid] = (0.35 * _rank_score(selected.mu_pred)
+                         + 0.25 * _rank_score(selected.dir_acc_val)
+                         + 0.15 * _rank_score(selected.corr_val)
+                         + 0.15 * _rank_score(selected.rmse_val, higher_is_better=False)
+                         + 0.10 * _rank_score(selected.positive_precision_val))
+    return out
 
 
 def run_mlp_lab(*, start_date: str = "2022-01-01", forecast_horizon: int = 5, target_aggregation: str = "mean", lags: int = 20, short_window: int = 5, long_window: int = 20, hidden_layers = "256,128,64", activation: str = "relu", solver: str = "adam", scaler: str = "standard", alpha: float = 1e-4, learning_rate: str = "adaptive", learning_rate_init: float = 1e-3, max_iter: int = 500, batch_size = "auto", early_stopping: bool = True, validation_fraction: float = 0.15, n_iter_no_change: int = 20, clip_pred: float = 0.02, winsorize_quantile: float = 0.01, include_abs_features: bool = True, include_square_features: bool = True, include_sign_features: bool = True, random_state: int = 42):
+    if forecast_horizon < 1 or target_aggregation not in {"mean", "sum"}:
+        raise ValueError("MLP horizon must be positive and aggregation mean or sum")
     dataset_dir = active_data_dir()
     returns = load_returns(data_dir=dataset_dir)
     if start_date and start_date != "full":
@@ -215,18 +243,28 @@ def run_mlp_lab(*, start_date: str = "2022-01-01", forecast_horizon: int = 5, ta
             series = returns[ticker].dropna().astype(float).copy()
             if len(series) < max(long_window + forecast_horizon + 30, 180):
                 continue
-            if winsorize_quantile and winsorize_quantile > 0:
-                q_low = float(series.quantile(winsorize_quantile))
-                q_high = float(series.quantile(1.0 - winsorize_quantile))
-                series = series.clip(lower=q_low, upper=q_high)
             feat_df = build_mlp_feature_frame(series, lags, short_window, long_window, include_abs_features, include_square_features, include_sign_features)
             feat_df["target"] = build_target(series, forecast_horizon, target_aggregation)
             aligned = feat_df.dropna().copy()
             if len(aligned) < 150:
                 continue
-            train_df, val_df, test_df = temporal_split(aligned)
+            train_df, val_df, test_df = temporal_split(aligned, forecast_horizon=forecast_horizon)
             if min(len(train_df), len(val_df), len(test_df)) == 0:
                 continue
+            # Freeze the chronological boundaries before clipping. Rebuilding
+            # features must not let removed/constant rows shift test into train.
+            winsor_lower = winsor_upper = None
+            winsor_train_end = train_df.index[-1]
+            if winsorize_quantile and winsorize_quantile > 0:
+                winsor_lower, winsor_upper = training_winsorization_bounds(series, winsor_train_end, winsorize_quantile)
+                series = series.clip(lower=winsor_lower, upper=winsor_upper)
+                feat_df = build_mlp_feature_frame(series, lags, short_window, long_window, include_abs_features, include_square_features, include_sign_features)
+                feat_df["target"] = build_target(series, forecast_horizon, target_aggregation)
+                aligned = feat_df.dropna().copy()
+                train_df, val_df, test_df = (aligned.reindex(part.index).dropna().copy()
+                                            for part in (train_df, val_df, test_df))
+                if min(len(train_df), len(val_df), len(test_df)) == 0:
+                    continue
 
             feature_cols = [c for c in aligned.columns if c not in ["ret", "target"]]
             X_train = train_df[feature_cols]
@@ -257,7 +295,10 @@ def run_mlp_lab(*, start_date: str = "2022-01-01", forecast_horizon: int = 5, ta
             pred_train = model.predict(X_train)
             pred_val = model.predict(X_val)
             pred_test = model.predict(X_test)
-            pred_latest = float(model.predict(aligned[feature_cols].tail(1))[0])
+            latest_input = aligned[feature_cols].tail(1)
+            pred_latest = float(model.predict(latest_input)[0])
+            if target_aggregation == "sum":
+                pred_latest /= forecast_horizon
             pred_latest = max(min(pred_latest, clip_pred), -clip_pred)
 
             detail_df = pd.concat([
@@ -267,9 +308,16 @@ def run_mlp_lab(*, start_date: str = "2022-01-01", forecast_horizon: int = 5, ta
             ], ignore_index=True)
             detail_df.to_csv(per_ticker_dir / f"{ticker}_predictions.csv", index=False)
             joblib.dump(model, run_model_dir / f"{ticker}_mlp_pipeline.joblib")
+            (run_model_dir / f"{ticker}_preprocessing.json").write_text(json.dumps({
+                "winsor_lower": winsor_lower, "winsor_upper": winsor_upper,
+                "winsor_train_end": str(pd.Timestamp(winsor_train_end)),
+                "forecast_horizon": forecast_horizon, "target_aggregation": target_aggregation,
+            }, indent=2), encoding="utf-8")
 
             pred_rows.append({"ticker": ticker, "mu_pred": pred_latest,
-                              "dataset_version": dataset_dir.name, "base_currency": "USD"})
+                              "dataset_version": dataset_dir.name, "base_currency": "USD",
+                              "as_of": str(pd.Timestamp(latest_input.index[-1]).date()),
+                              "prediction_units": "daily_log_return", "model_run_id": run_id})
             metrics_train = metric_bundle(y_train, pred_train)
             metrics_val = metric_bundle(y_val, pred_val)
             metrics_test = metric_bundle(y_test, pred_test)
@@ -280,6 +328,7 @@ def run_mlp_lab(*, start_date: str = "2022-01-01", forecast_horizon: int = 5, ta
                 "dir_acc_train": metrics_train["dir_acc"], "dir_acc_val": metrics_val["dir_acc"], "dir_acc_test": metrics_test["dir_acc"],
                 "corr_train": metrics_train["corr"], "corr_val": metrics_val["corr"], "corr_test": metrics_test["corr"],
                 "r2_train": metrics_train["r2"], "r2_val": metrics_val["r2"], "r2_test": metrics_test["r2"],
+                "positive_precision_val": positive_precision(y_val, pred_val),
                 "positive_precision_test": positive_precision(y_test, pred_test),
                 "pred_positive_rate_test": pred_positive_rate(pred_test),
             })
@@ -293,13 +342,17 @@ def run_mlp_lab(*, start_date: str = "2022-01-01", forecast_horizon: int = 5, ta
 
     merged = metrics_df.merge(predictions_df, on="ticker", how="inner")
     merged["score"] = build_composite_score(merged)
-    predictions_df = merged[["ticker", "mu_pred", "score", "dir_acc_test", "corr_test", "rmse_test", "positive_precision_test", "dataset_version", "base_currency"]].copy()
+    predictions_df = merged[["ticker", "mu_pred", "score", "dir_acc_test", "corr_test", "rmse_test", "positive_precision_test", "dir_acc_val", "corr_val", "rmse_val", "positive_precision_val",
+                             "dataset_version", "base_currency", "as_of", "prediction_units", "model_run_id"]].copy()
     metrics_df = merged[[
         "ticker", "rmse_train", "rmse_val", "rmse_test", "mae_train", "mae_val", "mae_test",
         "dir_acc_train", "dir_acc_val", "dir_acc_test", "corr_train", "corr_val", "corr_test",
-        "r2_train", "r2_val", "r2_test", "positive_precision_test", "pred_positive_rate_test", "score", "mu_pred",
+        "r2_train", "r2_val", "r2_test", "positive_precision_val", "positive_precision_test", "pred_positive_rate_test", "score", "mu_pred",
     ]].copy()
 
+    predictions_df["use_for_optimizer"] = predictions_df["score"].notna()
+    predictions_df["selection_reason"] = np.where(predictions_df["use_for_optimizer"],
+                                                  "validation_policy_accepted", "missing_validation_evidence")
     predictions_path = run_output_dir / "predictions.csv"
     metrics_path = run_output_dir / "metrics.csv"
     predictions_df.to_csv(predictions_path, index=False)
@@ -309,6 +362,11 @@ def run_mlp_lab(*, start_date: str = "2022-01-01", forecast_horizon: int = 5, ta
         "dataset": str(dataset_dir),
         "dataset_version": dataset_dir.name,
         "base_currency": "USD",
+        "prediction_units": "daily_log_return",
+        "selection_split": "validation",
+        "selection_metrics_version": 2,
+        "target_overlap_purge": forecast_horizon - 1,
+        "winsorization_fit_split": "training",
         "start_date": start_date,
         "forecast_horizon": forecast_horizon,
         "target_aggregation": target_aggregation,

@@ -24,7 +24,6 @@ def load_active_mlp_predictions(validate_current: bool = True) -> pd.DataFrame:
     if predictions.empty:
         return predictions
     predictions["ticker"] = predictions["ticker"].astype(str).str.strip()
-    predictions = _apply_selection_policy(predictions, active.get("selection_policy_json"))
 
     directory = active.get("run_output_dir") or active.get("local_run_output_dir")
     if directory:
@@ -32,7 +31,7 @@ def load_active_mlp_predictions(validate_current: bool = True) -> pd.DataFrame:
         forecast_file = directory / "predictions.csv"
         if forecast_file.exists():
             stored = pd.read_csv(forecast_file)
-            columns = [name for name in ("dataset_version", "base_currency", "as_of", "prediction_units")
+            columns = [name for name in ("dataset_version", "base_currency", "as_of", "prediction_units", "positive_precision_val", "dir_acc_val", "corr_val", "rmse_val")
                        if name in stored and name not in predictions]
             if columns:
                 predictions = predictions.merge(stored[["ticker"] + columns], on="ticker", how="left", validate="one_to_one")
@@ -42,6 +41,13 @@ def load_active_mlp_predictions(validate_current: bool = True) -> pd.DataFrame:
             for name in ("dataset_version", "base_currency", "as_of", "prediction_units"):
                 if name not in predictions and config.get(name) is not None:
                     predictions[name] = config[name]
+
+    from app import mlp_lab_storage as storage
+    if hasattr(storage, "_restore_validation_evidence"):
+        predictions = storage._restore_validation_evidence(predictions, active)
+    effective_policy = active.get("selection_policy_json") or {"policy_type": "all_assets"}
+    predictions = _apply_selection_policy(predictions, effective_policy)
+    predictions["selection_policy"] = [dict(effective_policy) for _ in range(len(predictions))]
 
     if "base_currency" not in predictions or not predictions["base_currency"].eq("USD").all():
         raise ValueError("Las predicciones MLP no tienen moneda base USD verificable. Reentrená el modelo.")

@@ -113,9 +113,11 @@ def build_model_inputs(model_type, returns, risk_config=None, prediction_fallbac
                   "dir_acc_val": _finite_metric(row, "dir_acc_val"),
                   "amp_ratio": _finite_metric(row, "amp_ratio")}
         if row is not None:
-            for key in ("model_run_id", "model_source", "dataset_version"):
+            for key in ("model_run_id", "model_source", "dataset_version", "selection_reason", "selection_split"):
                 if key in row:
                     signal[key] = str(row[key])
+        if row is not None and "selection_policy" in row:
+            signal["producer_selection_policy"] = row["selection_policy"]
         signals.append(signal)
     if estimator == "gjr_garch":
         if model_type != "ai_volatility":
