@@ -4,6 +4,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from src.data.load_data import assert_current_dataset
 from src.optimization.lstm_lab_loader import load_active_lstm_predictions_df
 from src.optimization.mlp_lab_loader import load_active_mlp_predictions
 
@@ -20,6 +21,7 @@ def _read_prediction_csv(filename: str) -> pd.DataFrame:
     df = pd.read_csv(path)
     if "ticker" not in df.columns:
         raise ValueError(f"{filename} debe contener la columna 'ticker'.")
+    assert_current_dataset(df)
     df["ticker"] = df["ticker"].astype(str).str.strip()
     return df
 
@@ -34,6 +36,7 @@ def load_volatility_predictions(prediction_file: str = "volatility_predictions.c
     missing = required_cols - set(preds.columns)
     if missing:
         raise ValueError(f"{prediction_file} no tiene columnas requeridas: {sorted(missing)}")
+    assert_current_dataset(preds)
     preds["vol_pred"] = preds["vol_pred"].astype(float)
     preds = preds.dropna(subset=["vol_pred"]).copy()
     preds = preds.drop_duplicates(subset=["ticker"], keep="last").copy()
@@ -98,12 +101,13 @@ def build_model_inputs(model_type: str, returns: pd.DataFrame):
 
     if model_type == "ai_returns_lstm":
         preds = load_active_lstm_predictions_df().copy()
+        assert_current_dataset(preds)
         preds["ticker"] = preds["ticker"].astype(str).str.strip()
         preds = preds.set_index("ticker")
         if "mu_pred" not in preds.columns:
             raise ValueError("Active LSTM Lab predictions must contain column 'mu_pred'")
-        if "dir_acc_test" not in preds.columns:
-            raise ValueError("Active LSTM Lab predictions must contain column 'dir_acc_test'")
+        if "dir_acc_val" not in preds.columns:
+            raise ValueError("Active LSTM Lab predictions must contain column 'dir_acc_val'")
         if "amp_ratio" not in preds.columns:
             raise ValueError("Active LSTM Lab predictions must contain column 'amp_ratio'")
         common = [t for t in returns.columns if t in preds.index]
@@ -114,9 +118,11 @@ def build_model_inputs(model_type: str, returns: pd.DataFrame):
         hist_mu = returns_sub.mean()
         mu = hist_mu.copy()
         good_mask = (
-            (preds["dir_acc_test"].astype(float) > LSTM_DIR_ACC_MIN)
+            (preds["dir_acc_val"].astype(float) > LSTM_DIR_ACC_MIN)
             & (preds["amp_ratio"].astype(float) > LSTM_AMP_RATIO_MIN)
         )
+        if "use_for_optimizer" in preds:
+            good_mask &= preds["use_for_optimizer"].fillna(False).astype(str).str.lower().eq("true")
         mu.loc[good_mask.index[good_mask]] = preds.loc[good_mask, "mu_pred"].astype(float)
         cov = returns_sub.cov()
         return mu.loc[common], cov.loc[common, common], common

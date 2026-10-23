@@ -368,6 +368,7 @@ def load_active_predictions_df() -> pd.DataFrame:
                 prediction_run_tickers.c.mu_pred,
                 prediction_run_tickers.c.rmse_test,
                 prediction_run_tickers.c.dir_acc_test,
+                prediction_run_tickers.c.dir_acc_val,
                 prediction_run_tickers.c.corr_test,
             ).select_from(
                 prediction_run_tickers.join(

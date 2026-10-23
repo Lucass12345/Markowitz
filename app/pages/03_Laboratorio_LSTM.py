@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))
 
-from src.data.load_data import load_returns
+from src.data.load_data import load_returns, assert_current_dataset
 try:
     from src.data.load_data import load_prices
 except Exception:
@@ -36,7 +36,7 @@ def get_prices(returns: pd.DataFrame) -> pd.DataFrame:
         except Exception:
             pass
 
-    synthetic = (1 + returns.fillna(0)).cumprod() * 100
+    synthetic = np.exp(returns.fillna(0).cumsum()) * 100
     return synthetic
 
 
@@ -59,13 +59,15 @@ def load_latest_saved_result():
         summary = json.loads(summary_path.read_text(encoding="utf-8")) if summary_path.exists() else {}
         config = json.loads(config_path.read_text(encoding="utf-8")) if config_path.exists() else {}
 
+        predictions = pd.read_csv(predictions_path)
+        assert_current_dataset(predictions)
         return {
             "run_id": latest["run_id"],
             "predictions_path": str(predictions_path),
             "metrics_path": str(metrics_path),
             "per_ticker_dir": str(run_output_dir / "per_ticker"),
             "curves_dir": str(run_output_dir / "loss_curves"),
-            "predictions": pd.read_csv(predictions_path),
+            "predictions": predictions,
             "metrics": pd.read_csv(metrics_path),
             "summary": {**config, **summary},
         }
@@ -117,6 +119,8 @@ def build_selected_features():
         if f_m20:
             selected.append("momentum_20")
 
+        selected.extend(st.multiselect("Features adicionales", ["log_return_sum_5", "log_return_sum_20", "downside_vol_20", "ewma_vol_20", "rolling_skew_20"], default=["log_return_sum_5", "downside_vol_20", "ewma_vol_20"]))
+
         start_date = st.selectbox(
             "Fecha inicial de entrenamiento",
             options=["full", "2020-01-01", "2021-01-01", "2022-01-01", "2023-01-01"],
@@ -124,17 +128,22 @@ def build_selected_features():
         )
 
         seq_len = st.slider("Ventana lookback (días hábiles)", 20, 60, 40)
-        forecast_horizon = st.slider("Horizonte de pronóstico (días hábiles)", 1, 10, 5)
+        forecast_horizon = 5
+        st.caption("Horizonte fijo: próximas cinco ruedas bursátiles")
         target_aggregation = st.radio("Agregación del target", options=["mean", "sum"], horizontal=True)
 
-        hidden_size = st.slider("Tamaño de capa oculta", 16, 128, 64, step=16)
-        num_layers = st.slider("Cantidad de capas", 1, 4, 2)
+        feature_search = st.checkbox("Comparar features seleccionadas contra retornos solos", value=True)
+        search = st.checkbox("Comparar arquitecturas, activaciones y Adam", value=True)
+        hidden_size = st.slider("Tamaño de capa oculta", 16, 128, 64, step=16, disabled=search)
+        num_layers = st.slider("Cantidad de capas", 1, 4, 2, disabled=search)
         dropout = st.slider("Dropout", 0.0, 0.5, 0.2, step=0.05)
         epochs = st.slider("Épocas", 10, 150, 50, step=10)
         batch_size = st.selectbox("Batch size", [16, 32, 64], index=1)
-        lr = st.selectbox("Learning rate", [1e-4, 5e-4, 1e-3, 5e-3], index=2)
+        lr = st.selectbox("Learning rate", [1e-4, 5e-4, 1e-3, 5e-3], index=2, disabled=search)
 
     return {
+        "feature_search": feature_search,
+        "search": search,
         "selected_features": selected,
         "start_date": start_date,
         "seq_len": seq_len,
@@ -264,6 +273,9 @@ def render_ticker_detail(merged: pd.DataFrame, result: dict, summary: dict, pric
     selected_ticker = st.selectbox("Seleccionar ticker", options=ticker_options)
     ticker_row = merged[merged["ticker"] == selected_ticker].iloc[0]
 
+    if pd.notna(ticker_row.get("selected_config")):
+        with st.expander("Configuración ganadora por validación"):
+            st.json(json.loads(ticker_row["selected_config"]))
     detail_cols = st.columns(5)
     with detail_cols[0]:
         st.metric("mu_pred", f"{float(ticker_row['mu_pred']):.6f}")
@@ -294,11 +306,12 @@ def render_ticker_detail(merged: pd.DataFrame, result: dict, summary: dict, pric
 
             if not last_5.empty:
                 last_date = pd.to_datetime(last_5.index[-1])
-                future_date = pd.bdate_range(last_date, periods=int(summary.get("forecast_horizon", 5)) + 1)[-1]
+                calendar = pd.date_range if (pd.DatetimeIndex(prices_t.tail(30).index).dayofweek >= 5).any() else pd.bdate_range
+                future_date = calendar(last_date, periods=int(summary.get("forecast_horizon", 5)) + 1)[-1]
                 last_price = float(last_5.iloc[-1])
                 mu_pred = float(ticker_row["mu_pred"])
                 horizon = int(summary.get("forecast_horizon", 5))
-                projected_price = float(last_price * ((1 + mu_pred) ** horizon))
+                projected_price = float(last_price * np.exp(mu_pred * horizon))
 
                 chart_df = pd.DataFrame({
                     "date": list(pd.to_datetime(last_5.index)) + [future_date],
@@ -321,7 +334,7 @@ def render_ticker_detail(merged: pd.DataFrame, result: dict, summary: dict, pric
                 ))
                 fig_price.update_layout(title=f"{selected_ticker}: últimas 5 cotizaciones + precio proyectado")
                 st.plotly_chart(fig_price, use_container_width=True)
-                st.caption(f"Precio proyectado en {horizon} días hábiles: {projected_price:.4f}")
+                st.caption(f"Precio proyectado en USD a {horizon} observaciones diarias: {projected_price:.4f}. Fecha orientativa; no incorpora feriados del mercado.")
 
     pred_file = Path(result["per_ticker_dir"]) / f"{selected_ticker}_predictions.csv"
     if pred_file.exists():
@@ -359,7 +372,7 @@ def main():
     st.set_page_config(page_title="Laboratorio LSTM", page_icon="🧠", layout="wide")
     st.title("Laboratorio LSTM")
     st.warning(DISCLAIMER_TEXT)
-    st.caption("Entrenamiento, predicción, ranking y análisis por ticker sobre el universo completo.")
+    st.caption("Entrenamiento y predicción de retornos en USD; cotizaciones en ARS convertidas con CCL histórico.")
 
     returns = load_returns()
     all_tickers = list(returns.columns)
@@ -374,6 +387,7 @@ def main():
 **Features seleccionadas:** {", ".join(cfg["selected_features"]) if cfg["selected_features"] else "None"}"""
     )
 
+    st.caption("Se comparan 64→64 y 120→64, activaciones ReLU/Tanh/GELU en la capa densa y dos configuraciones Adam. Selección por MSE de validación; test reservado. El horizonte es de cinco ruedas.")
     run_button = st.button("Entrenar y generar predicciones para el universo completo", use_container_width=True)
 
     if run_button:
@@ -383,6 +397,8 @@ def main():
 
         with st.spinner("Entrenando modelos LSTM configurables para todos los tickers disponibles..."):
             result = run_lstm_lab(
+                search=cfg["search"],
+                feature_search=cfg["feature_search"],
                 selected_features=cfg["selected_features"],
                 seq_len=cfg["seq_len"],
                 forecast_horizon=cfg["forecast_horizon"],
@@ -403,6 +419,12 @@ def main():
             st.session_state["lstm_lab_result"] = latest
 
     result = st.session_state.get("lstm_lab_result")
+    if result is not None:
+        try:
+            assert_current_dataset(result["predictions"])
+        except ValueError:
+            st.session_state.pop("lstm_lab_result", None)
+            result = None
 
     runs_df = get_prediction_runs_df()
 

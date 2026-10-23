@@ -1,7 +1,7 @@
 from pathlib import Path
 import pandas as pd
 
-from src.data.load_data import load_returns
+from src.data.load_data import load_returns, active_data_dir
 from src.data.features import build_features_for_ticker
 from src.models.return_model_mlp import ReturnMLPModel
 
@@ -12,7 +12,8 @@ OUTPUT_DIR = ROOT / "outputs" / "predictions"
 
 
 def train_all_return_models():
-    returns = load_returns()
+    dataset_dir = active_data_dir()
+    returns = load_returns(data_dir=dataset_dir)
 
     rows = []
 
@@ -54,7 +55,9 @@ def train_all_return_models():
             "ticker": ticker,
             "mse": metrics["mse"],
             "rmse": metrics["rmse"],
-            "mu_pred": pred
+            "mu_pred": pred,
+            "dataset_version": dataset_dir.name,
+            "base_currency": "USD",
         })
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)

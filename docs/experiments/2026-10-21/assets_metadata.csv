@@ -1,0 +1,41 @@
+ticker,name,asset_class,asset_type,quote_type,country,sector,category,block,exchange,currency,metadata_source,country_status,sector_status
+AAPL,Apple Inc.,equity,equity,EQUITY,United States,Technology,,US,NMS,USD,yahoo_finance,reported,reported
+ALUA.BA,Aluar Aluminio Argentino S.A.I.C.,equity,equity,EQUITY,Argentina,Basic Materials,,AR,BUE,ARS,yahoo_finance,reported,reported
+AMZN,"Amazon.com, Inc.",equity,equity,EQUITY,United States,Consumer Cyclical,,US,NMS,USD,yahoo_finance,reported,reported
+BBAR.BA,Banco BBVA Argentina S.A.,equity,equity,EQUITY,Argentina,Financial Services,,AR,BUE,ARS,yahoo_finance,reported,reported
+BMA.BA,Banco Macro S.A.,equity,equity,EQUITY,Argentina,Financial Services,,AR,BUE,ARS,yahoo_finance,reported,reported
+BRK-B,Berkshire Hathaway Inc.,equity,equity,EQUITY,United States,Financial Services,,US,NYQ,USD,yahoo_finance,reported,reported
+CEPU.BA,Central Puerto S.A.,equity,equity,EQUITY,Argentina,Utilities,,AR,BUE,ARS,yahoo_finance,reported,reported
+COME.BA,Sociedad Comercial del Plata S.A.,equity,equity,EQUITY,Argentina,Industrials,,AR,BUE,ARS,yahoo_finance,reported,reported
+EDN.BA,Empresa Distribuidora y Comercializadora Norte Sociedad Anónima,equity,equity,EQUITY,Argentina,Utilities,,AR,BUE,ARS,yahoo_finance,reported,reported
+EEM,iShares MSCI Emerging Markets ETF,etf,etf,ETF,,,Diversified Emerging Mkts,FUNDS_EQUITY,PCX,USD,yahoo_finance,unknown,unknown
+EFA,iShares MSCI EAFE ETF,etf,etf,ETF,,,Foreign Large Blend,FUNDS_EQUITY,PCX,USD,yahoo_finance,unknown,unknown
+GGAL.BA,Grupo Financiero Galicia S.A.,equity,equity,EQUITY,Argentina,Financial Services,,AR,BUE,ARS,yahoo_finance,reported,reported
+GLD,SPDR Gold Shares,etf,etf,ETF,,,Commodities Focused,FUNDS_EQUITY,PCX,USD,yahoo_finance,unknown,unknown
+GOOGL,Alphabet Inc.,equity,equity,EQUITY,United States,Communication Services,,US,NMS,USD,yahoo_finance,reported,reported
+HYG,iShares iBoxx $ High Yield Corporate Bond ETF,bond_fund,bond_fund,ETF,,,High Yield Bond,FUNDS_BONDS,PCX,USD,yahoo_finance,unknown,unknown
+IEF,iShares 7-10 Year Treasury Bond ETF,bond_fund,bond_fund,ETF,,,Long Government,FUNDS_BONDS,NGM,USD,yahoo_finance,unknown,unknown
+IWM,iShares Russell 2000 ETF,etf,etf,ETF,,,Small Blend,FUNDS_EQUITY,PCX,USD,yahoo_finance,unknown,unknown
+JPM,JPMorgan Chase & Co.,equity,equity,EQUITY,United States,Financial Services,,US,NYQ,USD,yahoo_finance,reported,reported
+KO,The Coca-Cola Company,equity,equity,EQUITY,United States,Consumer Defensive,,US,NYQ,USD,yahoo_finance,reported,reported
+LOMA.BA,Loma Negra Compañía Industrial Argentina Sociedad Anónima,equity,equity,EQUITY,Argentina,Basic Materials,,AR,BUE,ARS,yahoo_finance,reported,reported
+MA,Mastercard Incorporated,equity,equity,EQUITY,United States,Financial Services,,US,NYQ,USD,yahoo_finance,reported,reported
+META,"Meta Platforms, Inc.",equity,equity,EQUITY,United States,Communication Services,,US,NMS,USD,yahoo_finance,reported,reported
+MSFT,Microsoft Corporation,equity,equity,EQUITY,United States,Technology,,US,NMS,USD,yahoo_finance,reported,reported
+NVDA,NVIDIA Corporation,equity,equity,EQUITY,United States,Technology,,US,NMS,USD,yahoo_finance,reported,reported
+PAMP.BA,Pampa Energía S.A.,equity,equity,EQUITY,Argentina,Industrials,,AR,BUE,ARS,yahoo_finance,reported,reported
+PEP,"PepsiCo, Inc.",equity,equity,EQUITY,United States,Consumer Defensive,,US,NMS,USD,yahoo_finance,reported,reported
+QQQ,Invesco QQQ Trust,etf,etf,ETF,,,Large Growth,FUNDS_EQUITY,NGM,USD,yahoo_finance,unknown,unknown
+SPY,State Street SPDR S&P 500 ETF Trust,etf,etf,ETF,,,Large Blend,FUNDS_EQUITY,PCX,USD,yahoo_finance,unknown,unknown
+SUPV.BA,Grupo Supervielle S.A.,equity,equity,EQUITY,Argentina,Financial Services,,AR,BUE,ARS,yahoo_finance,reported,reported
+TGNO4.BA,Transportadora de Gas del Norte S.A.,equity,equity,EQUITY,Argentina,Energy,,AR,BUE,ARS,yahoo_finance,reported,reported
+TGSU2.BA,Transportadora de Gas del Sur S.A.,equity,equity,EQUITY,Argentina,Energy,,AR,BUE,ARS,yahoo_finance,reported,reported
+TLT,iShares 20+ Year Treasury Bond ETF,bond_fund,bond_fund,ETF,,,Long Government,FUNDS_BONDS,NGM,USD,yahoo_finance,unknown,unknown
+TSLA,"Tesla, Inc.",equity,equity,EQUITY,United States,Consumer Cyclical,,US,NMS,USD,yahoo_finance,reported,reported
+TXAR.BA,Ternium Argentina S.A.,equity,equity,EQUITY,Argentina,Basic Materials,,AR,BUE,ARS,yahoo_finance,reported,reported
+UNH,UnitedHealth Group Incorporated,equity,equity,EQUITY,United States,Healthcare,,US,NYQ,USD,yahoo_finance,reported,reported
+V,Visa Inc.,equity,equity,EQUITY,United States,Financial Services,,US,NYQ,USD,yahoo_finance,reported,reported
+VALO.BA,Banco de Valores S.A.,equity,equity,EQUITY,Argentina,Financial Services,,AR,BUE,ARS,yahoo_finance,reported,reported
+VNQ,Vanguard Real Estate Index Fund ETF Shares,etf,etf,ETF,,,Real Estate,FUNDS_EQUITY,PCX,USD,yahoo_finance,unknown,unknown
+XOM,ExxonMobil Holdings Corporation,equity,equity,EQUITY,United States,Energy,,US,NYQ,USD,yahoo_finance,reported,reported
+YPFD.BA,YPF Sociedad Anónima,equity,equity,EQUITY,Argentina,Energy,,AR,BUE,ARS,yahoo_finance,reported,reported

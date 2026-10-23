@@ -404,7 +404,7 @@ def main() -> None:
 
     st.title("Optimizador Markowitz")
     render_disclaimer()
-    st.caption("Plataforma de optimización de carteras conectada a FastAPI.")
+    st.caption("Optimización de carteras con retornos expresados en USD. Las cotizaciones en ARS se convierten con CCL histórico.")
 
     controls = sidebar_controls()
 

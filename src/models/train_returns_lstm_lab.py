@@ -10,11 +10,11 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 
-from src.data.load_data import load_returns
+from src.data.load_data import load_returns, active_data_dir
 from src.models.return_model_lstm import ReturnLSTM
 from src.models.lstm_features import build_lstm_feature_frame, select_feature_columns
 from src.models.sequence_utils import build_lstm_sequences_multifeature
-from app.lstm_lab_storage import persist_lstm_lab_run
+from src.models.lstm_search import fit_candidates, default_candidates, refit_deployment
 
 ROOT = Path(__file__).resolve().parents[2]
 OUTPUT_ROOT = ROOT / "outputs" / "lstm_lab" / "runs"
@@ -56,14 +56,14 @@ def corrcoef_safe(y_true, y_pred):
     return float(np.corrcoef(y_true, y_pred)[0, 1])
 
 
-def temporal_split(X, y, dates, train_frac=0.70, val_frac=0.15):
+def temporal_split(X, y, dates, train_frac=0.70, val_frac=0.15, forecast_horizon=5):
     n = len(X)
     train_end = int(n * train_frac)
     val_end = int(n * (train_frac + val_frac))
 
     return (
-        X[:train_end], y[:train_end], dates[:train_end],
-        X[train_end:val_end], y[train_end:val_end], dates[train_end:val_end],
+        X[:train_end-forecast_horizon+1], y[:train_end-forecast_horizon+1], dates[:train_end-forecast_horizon+1],
+        X[train_end:val_end-forecast_horizon+1], y[train_end:val_end-forecast_horizon+1], dates[train_end:val_end-forecast_horizon+1],
         X[val_end:], y[val_end:], dates[val_end:],
     )
 
@@ -109,13 +109,29 @@ def run_lstm_lab(
     hidden_size: int = 64,
     num_layers: int = 2,
     dropout: float = 0.2,
+    search: bool = True,
+    feature_search: bool = False,
+    refit_latest: bool = True,
+    candidates: list | None = None,
+    patience: int = 8,
+    persist_db: bool = True,
+    tickers: list | None = None,
+    publish_latest: bool = True,
+    returns_df: pd.DataFrame | None = None,
+    dataset_version: str | None = None,
 ):
-    returns = load_returns()
+    if forecast_horizon != 5:
+        raise ValueError("El horizonte de producción es de cinco ruedas bursátiles")
+    dataset_dir = active_data_dir()
+    dataset_version = dataset_version or dataset_dir.name
+    returns = load_returns(data_dir=dataset_dir) if returns_df is None else returns_df.copy()
+    if tickers is not None:
+        returns = returns[tickers]
 
     if start_date and start_date != "full":
         returns = returns.loc[start_date:]
 
-    run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     run_output_dir = OUTPUT_ROOT / run_id
     run_model_dir = MODEL_ROOT / run_id
     per_ticker_dir = run_output_dir / "per_ticker"
@@ -136,13 +152,10 @@ def run_lstm_lab(
             series = returns[ticker].dropna().astype(float)
 
             if len(series) < max(seq_len + forecast_horizon + 30, 120):
+                summary_rows.append({"ticker": ticker, "error": "insufficient_history", "n_observations": len(series)})
                 continue
 
-            q_low = float(series.quantile(0.01))
-            q_high = float(series.quantile(0.99))
-            series = series.clip(lower=q_low, upper=q_high)
-
-            feat_df = build_lstm_feature_frame(series)
+            feat_df = build_lstm_feature_frame(series).dropna()
             feat_df = select_feature_columns(feat_df, selected_features)
 
             common_idx = feat_df.index.intersection(series.index)
@@ -154,6 +167,7 @@ def run_lstm_lab(
             aligned = aligned.dropna()
 
             if len(aligned) < max(seq_len + forecast_horizon + 30, 120):
+                summary_rows.append({"ticker": ticker, "error": "insufficient_feature_history", "n_observations": len(aligned)})
                 continue
 
             X, y = build_lstm_sequences_multifeature(
@@ -167,13 +181,14 @@ def run_lstm_lab(
             target_dates = aligned.index[seq_len: len(aligned) - forecast_horizon + 1]
 
             if len(X) < 150:
+                summary_rows.append({"ticker": ticker, "error": "insufficient_sequences", "n_sequences": len(X)})
                 continue
 
             (
                 X_train, y_train, d_train,
                 X_val, y_val, d_val,
                 X_test, y_test, d_test,
-            ) = temporal_split(X, y, target_dates)
+            ) = temporal_split(X, y, target_dates, forecast_horizon=forecast_horizon)
 
             if min(len(X_train), len(X_val), len(X_test)) == 0:
                 continue
@@ -187,80 +202,33 @@ def run_lstm_lab(
             y_val_t = torch.tensor(y_val_s, dtype=torch.float32)
             X_test_t = torch.tensor(X_test_s, dtype=torch.float32)
 
-            train_loader = DataLoader(
-                TensorDataset(X_train_t, y_train_t),
-                batch_size=batch_size,
-                shuffle=False,
-            )
-
-            model = ReturnLSTM(
-                input_size=X_train.shape[2],
-                hidden_size=hidden_size,
-                num_layers=num_layers,
-                dropout=dropout,
-                dense_size=32,
-            ).to(DEVICE)
-
-            optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-            criterion = nn.SmoothL1Loss()
-
-            best_val = np.inf
-            best_state = None
-            train_losses = []
-            val_losses = []
-
-            for _ in range(epochs):
-                model.train()
-                batch_losses = []
-
-                for xb, yb in train_loader:
-                    xb = xb.to(DEVICE)
-                    yb = yb.to(DEVICE)
-
-                    optimizer.zero_grad()
-                    pred = model(xb)
-                    loss = criterion(pred, yb)
-                    loss.backward()
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-                    optimizer.step()
-
-                    batch_losses.append(loss.item())
-
-                train_loss = float(np.mean(batch_losses)) if batch_losses else np.nan
-                train_losses.append(train_loss)
-
-                model.eval()
-                with torch.no_grad():
-                    val_pred_scaled = model(X_val_t.to(DEVICE)).cpu().numpy()
-                    val_loss = float(criterion(torch.tensor(val_pred_scaled), y_val_t).item())
-
-                val_losses.append(val_loss)
-
-                if val_loss < best_val:
-                    best_val = val_loss
-                    best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
-
-            if best_state is not None:
-                model.load_state_dict(best_state)
+            configs = candidates if candidates is not None else (default_candidates() if search else [
+                dict(hidden_sizes=[hidden_size] * num_layers, activation="relu", lr=lr)])
+            if feature_search and "return" in selected_features and len(selected_features) > 1:
+                configs = [dict(c, feature_indices=indices, feature_set=name)
+                           for c in configs for name, indices in [("selected_features", list(range(len(selected_features)))),
+                                                                  ("returns_only", [selected_features.index("return")])]]
+            fitted = fit_candidates(X_train_s, y_train_s, X_val_s, y_val_s,
+                                    configs, epochs=epochs, batch_size=batch_size,
+                                    dropout=dropout, patience=patience, device=DEVICE)
+            model = fitted["model"]
+            best_val = fitted["best_val"]
+            train_losses, val_losses = fitted["train_losses"], fitted["val_losses"]
+            pd.DataFrame(fitted["candidates"]).to_csv(run_output_dir / f"{ticker}_candidates.csv", index=False)
+            # Inference window includes the latest observed return, unlike labeled windows.
+            latest_X = (feat_df.iloc[-seq_len:].values.astype(np.float32) - x_mean) / x_std
 
             model.eval()
             with torch.no_grad():
                 pred_train_scaled = model(X_train_t.to(DEVICE)).cpu().numpy()
                 pred_val_scaled = model(X_val_t.to(DEVICE)).cpu().numpy()
                 pred_test_scaled = model(X_test_t.to(DEVICE)).cpu().numpy()
-                last_pred_scaled = model(torch.tensor(X_test_s[-1:], dtype=torch.float32).to(DEVICE)).cpu().numpy()[0]
+                last_pred_scaled = model(torch.tensor(latest_X[None], dtype=torch.float32).to(DEVICE)).cpu().numpy()[0]
 
             pred_train = inverse_y(pred_train_scaled, y_mean, y_std)
             pred_val = inverse_y(pred_val_scaled, y_mean, y_std)
             pred_test = inverse_y(pred_test_scaled, y_mean, y_std)
             last_pred = float(inverse_y(last_pred_scaled, y_mean, y_std))
-
-            hist_mean = float(series.mean())
-            hist_std = float(series.std())
-            lower = hist_mean - 2.5 * hist_std
-            upper = hist_mean + 2.5 * hist_std
-            last_pred = float(np.clip(last_pred, lower, upper))
-            last_pred = float(np.clip(last_pred, -0.02, 0.02))
 
             train_metrics = {
                 "mae_train": mae(y_train, pred_train),
@@ -281,18 +249,42 @@ def run_lstm_lab(
                 "corr_test": corrcoef_safe(y_test, pred_test),
             }
 
+            evaluation_scalers = {"x_mean": x_mean.tolist(), "x_std": x_std.tolist(),
+                                  "y_mean": y_mean, "y_std": y_std}
+            refit_epochs = int(np.argmin(val_losses)) + 1
+            if refit_latest:
+                # Test metrics above describe the untouched evaluation checkpoint.
+                torch.save(model.state_dict(), run_model_dir / f"{ticker}_evaluation.pt")
+                model, x_mean, x_std, y_mean, y_std = refit_deployment(
+                    X, y, fitted["config"], epochs=refit_epochs, batch_size=batch_size,
+                    dropout=dropout, device=DEVICE)
+                latest_X = (feat_df.iloc[-seq_len:].values.astype(np.float32) - x_mean) / x_std
+                with torch.no_grad():
+                    last_pred = float(model(torch.tensor(latest_X[None], dtype=torch.float32).to(DEVICE)).cpu().item() * y_std + y_mean)
+
             pred_rows.append({
                 "ticker": ticker,
-                "mu_pred": last_pred,
+                "mu_pred": last_pred / forecast_horizon if target_aggregation == "sum" else last_pred,
+                "forecast_log_return_5d": last_pred if target_aggregation == "sum" else last_pred * forecast_horizon,
+                "forecast_simple_return_5d": float(np.expm1(last_pred if target_aggregation == "sum" else last_pred * forecast_horizon)),
+                "as_of": str(feat_df.index[-1].date()),
+                "forecast_horizon": forecast_horizon,
+                "dataset_version": dataset_version,
+                "base_currency": "USD",
+                "use_for_optimizer": val_metrics["rmse_val"] < rmse(y_val, np.full_like(y_val, y_train.mean())),
             })
 
             summary_rows.append({
                 "ticker": ticker,
                 "best_val_loss": best_val,
+                "selected_config": json.dumps(fitted["config"]),
+                "baseline_rmse_test": rmse(y_test, np.full_like(y_test, y_train.mean())),
+                "baseline_rmse_val": rmse(y_val, np.full_like(y_val, y_train.mean())),
+                "zero_rmse_test": rmse(y_test, np.zeros_like(y_test)),
                 "n_train": int(len(y_train)),
                 "n_val": int(len(y_val)),
                 "n_test": int(len(y_test)),
-                "mu_pred": last_pred,
+                "mu_pred": last_pred / forecast_horizon if target_aggregation == "sum" else last_pred,
                 **train_metrics,
                 **val_metrics,
                 **test_metrics,
@@ -332,6 +324,12 @@ def run_lstm_lab(
             with open(run_model_dir / f"{ticker}_meta.json", "w", encoding="utf-8") as f:
                 json.dump({
                     "ticker": ticker,
+                    "selected_config": fitted["config"],
+                    "refit_latest": refit_latest,
+                    "refit_epochs": refit_epochs if refit_latest else None,
+                    "evaluation_metrics_before_refit": True,
+                    "evaluation_scalers": evaluation_scalers,
+                    "as_of": str(feat_df.index[-1].date()),
                     "selected_features": selected_features,
                     "seq_len": seq_len,
                     "forecast_horizon": forecast_horizon,
@@ -368,6 +366,7 @@ def run_lstm_lab(
 
     summary = {
         "run_id": run_id,
+        "dataset": str(dataset_dir),
         "total_tickers_in_universe": total_tickers,
         "tickers_with_predictions": int(len(predictions_df)),
         "start_date": start_date,
@@ -375,6 +374,10 @@ def run_lstm_lab(
         "seq_len": seq_len,
         "forecast_horizon": forecast_horizon,
         "target_aggregation": target_aggregation,
+        "feature_search": feature_search,
+        "search": search,
+        "selection_metric": "validation_mse",
+        "test_used_for_selection": False,
         "epochs": epochs,
         "batch_size": batch_size,
         "lr": lr,
@@ -396,20 +399,21 @@ def run_lstm_lab(
 
     latest_ptr = ROOT / "outputs" / "lstm_lab" / "latest_run.json"
     latest_ptr.parent.mkdir(parents=True, exist_ok=True)
-    latest_ptr.write_text(json.dumps({
-        "run_id": run_id,
-        "run_output_dir": str(run_output_dir),
-        "run_model_dir": str(run_model_dir),
-    }, indent=2), encoding="utf-8")
+    if publish_latest and not predictions_df.empty:
+        latest_ptr.write_text(json.dumps({
+            "run_id": run_id,
+            "run_output_dir": str(run_output_dir),
+            "run_model_dir": str(run_model_dir),
+        }, indent=2), encoding="utf-8")
 
-    db_run_pk = persist_lstm_lab_run(
-        run_id=run_id,
-        summary=summary,
-        predictions_df=predictions_df,
-        metrics_df=metrics_df,
-        run_output_dir=str(run_output_dir),
-        run_model_dir=str(run_model_dir),
-    )
+    db_run_pk = None
+    if persist_db:
+        from app.lstm_lab_storage import persist_lstm_lab_run
+        db_run_pk = persist_lstm_lab_run(
+            run_id=run_id, summary=summary, predictions_df=predictions_df,
+            metrics_df=metrics_df, run_output_dir=str(run_output_dir),
+            run_model_dir=str(run_model_dir),
+        )
 
     return {
         "run_id": run_id,

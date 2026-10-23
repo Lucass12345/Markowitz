@@ -2,33 +2,36 @@ from __future__ import annotations
 
 from pathlib import Path
 import pandas as pd
+import json
 
-from app.lstm_lab_storage import get_active_prediction_run, load_active_predictions_df
+from src.data.load_data import assert_current_dataset
+
+ROOT = Path(__file__).resolve().parents[2]
 
 
 def _compute_amp_ratio_from_run_dir(run_output_dir: str | None) -> pd.DataFrame:
     if not run_output_dir:
-        return pd.DataFrame(columns=["ticker", "std_y_true_test", "std_y_pred_test", "amp_ratio"])
+        return pd.DataFrame(columns=["ticker", "std_y_true_val", "std_y_pred_val", "amp_ratio"])
 
     per_ticker_dir = Path(run_output_dir) / "per_ticker"
     if not per_ticker_dir.exists():
-        return pd.DataFrame(columns=["ticker", "std_y_true_test", "std_y_pred_test", "amp_ratio"])
+        return pd.DataFrame(columns=["ticker", "std_y_true_val", "std_y_pred_val", "amp_ratio"])
 
     rows: list[dict] = []
     for csv_path in sorted(per_ticker_dir.glob("*_predictions.csv")):
         ticker = csv_path.name.replace("_predictions.csv", "")
         try:
             df = pd.read_csv(csv_path)
-            test_df = df.loc[df["split"].astype(str).str.lower() == "test", ["y_true", "y_pred"]].copy()
-            if test_df.empty:
+            validation_df = df.loc[df["split"].astype(str).str.lower() == "val", ["y_true", "y_pred"]].copy()
+            if validation_df.empty:
                 continue
-            std_y_true = float(pd.to_numeric(test_df["y_true"], errors="coerce").std())
-            std_y_pred = float(pd.to_numeric(test_df["y_pred"], errors="coerce").std())
+            std_y_true = float(pd.to_numeric(validation_df["y_true"], errors="coerce").std())
+            std_y_pred = float(pd.to_numeric(validation_df["y_pred"], errors="coerce").std())
             amp_ratio = (std_y_pred / std_y_true) if pd.notna(std_y_true) and std_y_true > 0 else float("nan")
             rows.append({
                 "ticker": ticker,
-                "std_y_true_test": std_y_true,
-                "std_y_pred_test": std_y_pred,
+                "std_y_true_val": std_y_true,
+                "std_y_pred_val": std_y_pred,
                 "amp_ratio": amp_ratio,
             })
         except Exception:
@@ -38,11 +41,36 @@ def _compute_amp_ratio_from_run_dir(run_output_dir: str | None) -> pd.DataFrame:
 
 
 def load_active_lstm_predictions_df() -> pd.DataFrame:
-    preds = load_active_predictions_df().copy()
-    active_run = get_active_prediction_run()
-    run_output_dir = active_run.get("local_run_output_dir") if active_run else None
-    amp_df = _compute_amp_ratio_from_run_dir(run_output_dir)
-    if amp_df.empty:
-        preds["amp_ratio"] = float("nan")
+    def provenance(preds, directory):
+        forecast_file = Path(directory) / "predictions.csv" if directory else None
+        if forecast_file and forecast_file.exists():
+            extra = pd.read_csv(forecast_file)
+            columns = [c for c in ["dataset_version", "use_for_optimizer"] if c in extra and c not in preds]
+            if columns:
+                preds = preds.merge(extra[["ticker"] + columns], on="ticker", how="left")
         return preds
-    return preds.merge(amp_df, on="ticker", how="left")
+
+    # Honor an explicitly active, current laboratory run; otherwise use automation.
+    database_error = None
+    try:
+        from app.lstm_lab_storage import get_active_prediction_run, load_active_predictions_df
+        active = get_active_prediction_run()
+        if active:
+            run_output_dir = active.get("local_run_output_dir")
+            preds = provenance(load_active_predictions_df().copy(), run_output_dir)
+            assert_current_dataset(preds)
+            if not preds.empty:
+                amp = _compute_amp_ratio_from_run_dir(run_output_dir)
+                return preds.merge(amp, on="ticker", how="left") if not amp.empty else preds.assign(amp_ratio=float("nan"))
+    except Exception as exc:
+        database_error = exc
+
+    local = ROOT / "outputs" / "predictions" / "return_predictions_lstm.csv"
+    pointer = local.parent / "lstm_production.json"
+    if not local.exists() or not pointer.exists():
+        raise ValueError("No hay predicciones LSTM vigentes. Ejecutá el entrenamiento del laboratorio o la automatización.") from database_error
+    info = json.loads(pointer.read_text(encoding="utf-8"))
+    preds = pd.read_csv(local)
+    assert_current_dataset(preds)
+    amp = _compute_amp_ratio_from_run_dir(info["run_output_dir"])
+    return preds.merge(amp, on="ticker", how="left") if not amp.empty else preds.assign(amp_ratio=float("nan"))

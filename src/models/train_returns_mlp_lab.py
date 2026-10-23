@@ -14,8 +14,7 @@ from sklearn.neural_network import MLPRegressor
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import MinMaxScaler, RobustScaler, StandardScaler
 
-from src.data.load_data import load_returns
-from app.mlp_lab_storage import persist_mlp_lab_run
+from src.data.load_data import load_returns, active_data_dir
 
 ROOT = Path(__file__).resolve().parents[2]
 OUTPUT_ROOT = ROOT / "outputs" / "mlp_lab" / "runs"
@@ -193,7 +192,8 @@ def build_composite_score(df: pd.DataFrame) -> pd.Series:
 
 
 def run_mlp_lab(*, start_date: str = "2022-01-01", forecast_horizon: int = 5, target_aggregation: str = "mean", lags: int = 20, short_window: int = 5, long_window: int = 20, hidden_layers = "256,128,64", activation: str = "relu", solver: str = "adam", scaler: str = "standard", alpha: float = 1e-4, learning_rate: str = "adaptive", learning_rate_init: float = 1e-3, max_iter: int = 500, batch_size = "auto", early_stopping: bool = True, validation_fraction: float = 0.15, n_iter_no_change: int = 20, clip_pred: float = 0.02, winsorize_quantile: float = 0.01, include_abs_features: bool = True, include_square_features: bool = True, include_sign_features: bool = True, random_state: int = 42):
-    returns = load_returns()
+    dataset_dir = active_data_dir()
+    returns = load_returns(data_dir=dataset_dir)
     if start_date and start_date != "full":
         returns = returns.loc[start_date:]
     hidden_layers_tuple = _parse_hidden_layers(hidden_layers)
@@ -268,7 +268,8 @@ def run_mlp_lab(*, start_date: str = "2022-01-01", forecast_horizon: int = 5, ta
             detail_df.to_csv(per_ticker_dir / f"{ticker}_predictions.csv", index=False)
             joblib.dump(model, run_model_dir / f"{ticker}_mlp_pipeline.joblib")
 
-            pred_rows.append({"ticker": ticker, "mu_pred": pred_latest})
+            pred_rows.append({"ticker": ticker, "mu_pred": pred_latest,
+                              "dataset_version": dataset_dir.name, "base_currency": "USD"})
             metrics_train = metric_bundle(y_train, pred_train)
             metrics_val = metric_bundle(y_val, pred_val)
             metrics_test = metric_bundle(y_test, pred_test)
@@ -292,7 +293,7 @@ def run_mlp_lab(*, start_date: str = "2022-01-01", forecast_horizon: int = 5, ta
 
     merged = metrics_df.merge(predictions_df, on="ticker", how="inner")
     merged["score"] = build_composite_score(merged)
-    predictions_df = merged[["ticker", "mu_pred", "score", "dir_acc_test", "corr_test", "rmse_test", "positive_precision_test"]].copy()
+    predictions_df = merged[["ticker", "mu_pred", "score", "dir_acc_test", "corr_test", "rmse_test", "positive_precision_test", "dataset_version", "base_currency"]].copy()
     metrics_df = merged[[
         "ticker", "rmse_train", "rmse_val", "rmse_test", "mae_train", "mae_val", "mae_test",
         "dir_acc_train", "dir_acc_val", "dir_acc_test", "corr_train", "corr_val", "corr_test",
@@ -305,6 +306,9 @@ def run_mlp_lab(*, start_date: str = "2022-01-01", forecast_horizon: int = 5, ta
     metrics_df.to_csv(metrics_path, index=False)
 
     config = {
+        "dataset": str(dataset_dir),
+        "dataset_version": dataset_dir.name,
+        "base_currency": "USD",
         "start_date": start_date,
         "forecast_horizon": forecast_horizon,
         "target_aggregation": target_aggregation,
@@ -351,6 +355,7 @@ def run_mlp_lab(*, start_date: str = "2022-01-01", forecast_horizon: int = 5, ta
     latest_ptr.parent.mkdir(parents=True, exist_ok=True)
     latest_ptr.write_text(json.dumps({"run_id": run_id, "run_output_dir": str(run_output_dir), "run_model_dir": str(run_model_dir)}, indent=2), encoding="utf-8")
 
+    from app.mlp_lab_storage import persist_mlp_lab_run
     persist_mlp_lab_run(run_id=run_id, summary=summary, predictions_df=predictions_df, metrics_df=metrics_df, run_output_dir=str(run_output_dir), run_model_dir=str(run_model_dir))
 
     return {

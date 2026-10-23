@@ -31,6 +31,8 @@ def build_lstm_sequences_multifeature(
     forecast_horizon: int = 5,
     target_aggregation: str = "mean",
 ):
+    if forecast_horizon < 1 or seq_len < 1 or target_aggregation not in {"mean", "sum"}:
+        raise ValueError("Invalid sequence length, horizon or target aggregation")
     X, y = [], []
 
     df = feature_df.copy()

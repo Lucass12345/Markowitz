@@ -900,3 +900,8 @@ Este sistema es únicamente informativo, experimental y educativo. **No constitu
 ## 22. Resumen final
 
 **Optimizador Markowitz** es una plataforma de portfolio optimization con restricciones por bloques, donde Streamlit orquesta la experiencia de usuario, FastAPI ejecuta la lógica, PostgreSQL/SQLite persisten corridas, MLflow y MinIO trazan artefactos, y los modos `classic`, `ai_returns`, `ai_returns_lstm` y `ai_volatility` permiten comparar benchmark histórico contra inputs enriquecidos por modelos predictivos.
+
+
+## Dataset Yahoo Finance y validación de modelos
+
+Los precios y retornos dinámicos se unifican en **USD**; las cotizaciones en ARS se convierten mediante CCL histórico antes de calcular retornos. El universo puede elegirse desde la página **Dataset Dinámico** o con `python scripts/run_refresh_dataset.py --tickers AAPL TLT GGAL.BA --retrain`. La LSTM pronostica las próximas cinco ruedas y compara features, 64→64/120→64, activaciones y Adam mediante validación temporal purgada. GARCH agrega diagnósticos y backtest contra EWMA. [Configuración, metodología y automatización](docs/dynamic-models.md).

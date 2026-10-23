@@ -1,0 +1,24 @@
+{
+  "tickers": [
+    "AAPL",
+    "TLT",
+    "GGAL.BA"
+  ],
+  "epochs": 30,
+  "start": "2022-01-01",
+  "dataset": "/workspace/Markowitz/Data/dynamic/20261021T185127_b7b5cd1c",
+  "selection": "lowest validation RMSE, including feature set",
+  "test_used_for_selection": false,
+  "runs": [
+    "20261021_185156_818198",
+    "20261021_185830_015929"
+  ],
+  "seed": 42,
+  "versions": {
+    "torch": "2.14.1+cpu",
+    "numpy": "2.3.5",
+    "pandas": "2.2.3",
+    "arch": "8.0.0",
+    "yfinance": "1.7.0"
+  }
+}

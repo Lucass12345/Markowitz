@@ -1,0 +1,22 @@
+{
+  "tickers": [
+    "GGAL.BA"
+  ],
+  "epochs": 30,
+  "start": "2022-01-01",
+  "dataset": "/workspace/Markowitz/Data/dynamic/20261021T191543_52819bd7",
+  "selection": "lowest validation RMSE, including feature set",
+  "test_used_for_selection": false,
+  "seed": 42,
+  "versions": {
+    "torch": "2.14.1+cpu",
+    "numpy": "2.3.5",
+    "pandas": "2.2.3",
+    "arch": "8.0.0",
+    "yfinance": "1.7.0"
+  },
+  "runs": [
+    "20261021_191613_152252",
+    "20261021_191756_416318"
+  ]
+}

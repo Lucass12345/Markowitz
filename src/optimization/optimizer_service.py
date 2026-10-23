@@ -1,25 +1,9 @@
-from pathlib import Path
-import pandas as pd
-
 from src.config import TRADING_DAYS
 from src.markowitz import rf_simple_annual_to_log_daily
-from src.data.load_data import load_returns
+from src.data.load_data import load_returns, load_metadata
 from src.optimization.inputs_builder import build_model_inputs
 from src.optimization.frontier_engine import run_frontier
 from src.optimization.optimize_blocks import run_blocks_optimizer
-
-ROOT = Path(__file__).resolve().parents[2]
-DATA_DIR = ROOT / "Data"
-
-
-def load_metadata() -> pd.DataFrame:
-    path = DATA_DIR / "assets_metadata.csv"
-    if not path.exists():
-        raise FileNotFoundError(f"No existe {path}")
-    meta = pd.read_csv(path)
-    meta["ticker"] = meta["ticker"].astype(str).str.strip()
-    return meta
-
 
 def optimize_portfolio_mode(
     model_type: str,

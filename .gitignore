@@ -1,2 +1,9 @@
 __pycache__/
 *.pyc
+Data/dynamic/
+Data/active_dataset.json
+outputs/model_search*/
+.venv/
+outputs/lstm_lab/runs/
+models_artifacts/returns_lstm/runs/
+.pytest_cache/

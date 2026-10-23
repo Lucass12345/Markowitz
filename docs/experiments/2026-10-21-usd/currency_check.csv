@@ -1,0 +1,11 @@
+date,rate,source,rate_date,age_days,ticker,quote_currency,usd_per_currency,unit_scale,price_ARS,price_USD,log_return_USD
+2026-10-06,1610.8,https://api.argentinadatos.com/v1/cotizaciones/dolares/contadoconliqui#venta,2026-10-06,0,GGAL.BA,ARS,0.0006208095356344,1.0,6165.0,3.827290787186492,0.01291618990448
+2026-10-07,1610.8,https://api.argentinadatos.com/v1/cotizaciones/dolares/contadoconliqui#venta,2026-10-07,0,GGAL.BA,ARS,0.0006208095356344,1.0,5970.0,3.70623292773777,-0.0321412092117969
+2026-10-08,1608.7,https://api.argentinadatos.com/v1/cotizaciones/dolares/contadoconliqui#venta,2026-10-08,0,GGAL.BA,ARS,0.0006216199415677,1.0,5950.0,3.698638652327967,-0.0020511572659354
+2026-10-09,1613.6,https://api.argentinadatos.com/v1/cotizaciones/dolares/contadoconliqui#venta,2026-10-09,0,GGAL.BA,ARS,0.0006197322756569,1.0,5940.0,3.6812097174020826,-0.0047233944267245
+2026-10-13,1606.6,https://api.argentinadatos.com/v1/cotizaciones/dolares/contadoconliqui#venta,2026-10-13,0,GGAL.BA,ARS,0.0006224324660774,1.0,5940.0,3.6972488484999375,0.00434756290029
+2026-10-14,1613.8,https://api.argentinadatos.com/v1/cotizaciones/dolares/contadoconliqui#venta,2026-10-14,0,GGAL.BA,ARS,0.0006196554715578,1.0,5750.0,3.5630189614574297,-0.0369807802399886
+2026-10-15,1617.3,https://api.argentinadatos.com/v1/cotizaciones/dolares/contadoconliqui#venta,2026-10-15,0,GGAL.BA,ARS,0.0006183144747418,1.0,5900.0,3.648055400976937,0.0235860503910881
+2026-10-16,1616.0,https://api.argentinadatos.com/v1/cotizaciones/dolares/contadoconliqui#venta,2026-10-16,0,GGAL.BA,ARS,0.0006188118811881,1.0,5805.0,3.5922029702970297,-0.0154286037171268
+2026-10-19,1620.5,https://api.argentinadatos.com/v1/cotizaciones/dolares/contadoconliqui#venta,2026-10-19,0,GGAL.BA,ARS,0.0006170934896636,1.0,5690.0,3.5112619561863623,-0.0227901505121766
+2026-10-20,1625.6,https://api.argentinadatos.com/v1/cotizaciones/dolares/contadoconliqui#venta,2026-10-20,0,GGAL.BA,ARS,0.0006151574803149,1.0,5765.0,3.546382874015748,0.009952670780222
