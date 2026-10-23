@@ -115,7 +115,7 @@ from src.markowitz_classic import (
     max_sharpe,
     efficient_frontier,
 )
-from src.utils_portfolio import port_stats_log, annualize_log
+from src.utils_portfolio import port_stats_log, annualize_log, annualized_sharpe
 
 
 def _stats_dict(
@@ -139,7 +139,7 @@ def _stats_dict(
         "sharpe_daily": float(sh_d),
         "return_annual": float(mu_a),
         "vol_annual": float(vol_a),
-        "sharpe_annual": float(sh_d),
+        "sharpe_annual": annualized_sharpe(sh_d, periods),
     }
 
 
@@ -203,7 +203,7 @@ import numpy as np
 import pandas as pd
 
 from src.markowitz import max_sharpe_with_blocks
-from src.utils_portfolio import port_stats_log, annualize_log
+from src.utils_portfolio import port_stats_log, annualize_log, annualized_sharpe
 
 
 def build_blocks_from_meta(tickers: list[str], meta: pd.DataFrame, targets: dict) -> dict:
@@ -287,7 +287,7 @@ def run_blocks_optimizer(
         "sharpe_daily": float(sh_d),
         "return_annual": float(mu_a),
         "vol_annual": float(vol_a),
-        "sharpe_annual": float(sh_d),
+        "sharpe_annual": annualized_sharpe(sh_d, periods),
     }
 
     return {

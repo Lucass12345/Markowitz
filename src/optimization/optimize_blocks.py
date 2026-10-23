@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 
 from src.markowitz import max_sharpe_with_blocks
-from src.utils_portfolio import port_stats_log, annualize_log
+from src.utils_portfolio import portfolio_statistics
 
 
 def build_blocks_from_meta(tickers: list[str], meta: pd.DataFrame, targets: dict) -> dict:
@@ -72,22 +72,7 @@ def run_blocks_optimizer(
 
     exposures_df = compute_block_exposures(w, meta, targets)
 
-    mu_d, vol_d, sh_d = port_stats_log(
-        w.values,
-        mu,
-        cov,
-        rf_log_daily=rf_log_daily
-    )
-    mu_a, vol_a = annualize_log(mu_d, vol_d, periods=periods)
-
-    stats = {
-        "return_daily": float(mu_d),
-        "vol_daily": float(vol_d),
-        "sharpe_daily": float(sh_d),
-        "return_annual": float(mu_a),
-        "vol_annual": float(vol_a),
-        "sharpe_annual": float(sh_d),
-    }
+    stats = portfolio_statistics(w.values, mu, cov, rf_log_daily, periods)
 
     return {
         "weights_array": w.values,

@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import os
 import tempfile
@@ -68,6 +68,8 @@ def track_run_mlflow(run_db_id: int, run_label: str | None, config: dict, result
                 {
                     "blocks_return_annual": float(block_stats["return_annual"]),
                     "blocks_vol_annual": float(block_stats["vol_annual"]),
+                    "blocks_sharpe_daily": float(block_stats["sharpe_daily"]),
+                    "blocks_return_log_annual": float(block_stats["return_annual"]),
                     "blocks_sharpe_annual": float(block_stats["sharpe_annual"]),
                     "minvar_return_annual": float(minvar_stats["return_annual"]),
                     "minvar_vol_annual": float(minvar_stats["vol_annual"]),

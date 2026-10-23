@@ -22,7 +22,7 @@ def optimize_portfolio_mode(
     returns = load_returns().dropna(how="any")
     meta = load_metadata()
 
-    rf_log_daily = rf_simple_annual_to_log_daily(rf_annual_simple)
+    rf_log_daily = rf_simple_annual_to_log_daily(rf_annual_simple, periods=periods)
 
     mu, cov, tickers = build_model_inputs(
         model_type=model_type,

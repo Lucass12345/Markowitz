@@ -89,7 +89,7 @@ def build_frontier_figure(frontier_df: pd.DataFrame, comparison_df: pd.DataFrame
     fig.update_layout(
         title="Frontera guardada",
         xaxis_title="Volatilidad anual",
-        yaxis_title="Retorno anual",
+        yaxis_title="Retorno logarítmico anual",
         height=600,
         margin=dict(l=20, r=20, t=60, b=20),
     )
@@ -157,6 +157,8 @@ except Exception as exc:
     st.stop()
 
 metrics = run["metrics_json"]
+if metrics.get("metrics_version", 1) < 2:
+    st.info("Corrida histórica: conserva sus métricas originales. El campo Sharpe anual anterior a v2 podía contener Sharpe diario; no se recalcula este registro.")
 comparison_df = pd.DataFrame(run["comparison_json"])
 weights_df = pd.DataFrame(run["weights_json"])
 exposure_df = pd.DataFrame(run["block_exposure_json"])
@@ -165,11 +167,11 @@ targets = run["targets_json"]
 
 m1, m2, m3 = st.columns(3)
 with m1:
-    render_metric_card("Retorno anual", pretty_pct(metrics["return_annual"]))
+    render_metric_card("Retorno logarítmico anual", pretty_pct(metrics["return_annual"]))
 with m2:
     render_metric_card("Volatilidad anual", pretty_pct(metrics["vol_annual"]))
 with m3:
-    render_metric_card("Ratio de Sharpe", f"{metrics['sharpe_annual']:.3f}")
+    render_metric_card("Sharpe anualizado", f"{metrics['sharpe_annual']:.3f}")
 
 left, right = st.columns([0.95, 1.05])
 with left:

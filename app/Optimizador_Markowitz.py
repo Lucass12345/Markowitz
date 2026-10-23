@@ -191,7 +191,7 @@ def build_frontier_figure(result: dict) -> go.Figure:
     fig.update_layout(
         title="Frontera eficiente y selección de cartera",
         xaxis_title="Volatilidad anual",
-        yaxis_title="Retorno anual",
+        yaxis_title="Retorno logarítmico anual",
         height=620,
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1.0),
         margin=dict(l=20, r=20, t=70, b=20),
@@ -494,11 +494,11 @@ def main() -> None:
     block_stats = result["blocks"]["stats"]
     m1, m2, m3 = st.columns(3)
     with m1:
-        render_metric_card("Retorno anual", pretty_pct(block_stats["return_annual"]))
+        render_metric_card("Retorno logarítmico anual", pretty_pct(block_stats["return_annual"]))
     with m2:
         render_metric_card("Volatilidad anual", pretty_pct(block_stats["vol_annual"]))
     with m3:
-        render_metric_card("Ratio de Sharpe", f"{block_stats['sharpe_annual']:.3f}")
+        render_metric_card("Sharpe anualizado", f"{block_stats['sharpe_annual']:.3f}")
 
     st.plotly_chart(build_frontier_figure(result), use_container_width=True)
 

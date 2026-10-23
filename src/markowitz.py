@@ -49,11 +49,11 @@ def _check_block_targets(block_targets, blocks, tol=1e-9):
             raise KeyError(f"block '{bname}' not in blocks dict")
 
 
-def rf_simple_annual_to_log_daily(rf_simple_annual: float) -> float:
+def rf_simple_annual_to_log_daily(rf_simple_annual: float, periods: int = TRADING_DAYS) -> float:
     """
     Convierte rf simple anual -> log daily (consistente con log returns diarios).
     """
-    return float(np.log1p(rf_simple_annual) / TRADING_DAYS)
+    return float(np.log1p(rf_simple_annual) / periods)
 
 
 # =========================================================

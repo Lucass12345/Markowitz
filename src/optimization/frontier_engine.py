@@ -6,7 +6,7 @@ from src.markowitz_classic import (
     max_sharpe,
     efficient_frontier,
 )
-from src.utils_portfolio import port_stats_log, annualize_log
+from src.utils_portfolio import annualize_log, portfolio_statistics
 
 
 def _stats_dict(
@@ -16,22 +16,7 @@ def _stats_dict(
     rf_log_daily: float = 0.0,
     periods: int = 252,
 ) -> dict:
-    mu_d, vol_d, sh_d = port_stats_log(
-        weights,
-        mu,
-        cov,
-        rf_log_daily=rf_log_daily
-    )
-    mu_a, vol_a = annualize_log(mu_d, vol_d, periods=periods)
-
-    return {
-        "return_daily": float(mu_d),
-        "vol_daily": float(vol_d),
-        "sharpe_daily": float(sh_d),
-        "return_annual": float(mu_a),
-        "vol_annual": float(vol_a),
-        "sharpe_annual": float(sh_d),
-    }
+    return portfolio_statistics(weights, mu, cov, rf_log_daily, periods)
 
 
 def _clean_frontier(frontier_pts, periods: int = 252) -> pd.DataFrame:
@@ -52,6 +37,7 @@ def _clean_frontier(frontier_pts, periods: int = 252) -> pd.DataFrame:
     df["return_annual"] = [x[0] for x in annualized]
     df["vol_annual"] = [x[1] for x in annualized]
 
+    df["return_log_annual"] = df["return_annual"]
     # ordenar por volatilidad
     df = df.sort_values("vol_annual").reset_index(drop=True)
 

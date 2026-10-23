@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from typing import Any
 
@@ -45,6 +45,9 @@ def build_comparison_payload(result: dict) -> list[dict]:
             {
                 "portfolio": label,
                 "return_annual": float(stats["return_annual"]),
+                "return_log_annual": float(stats.get("return_log_annual", stats["return_annual"])),
+                "sharpe_daily": stats.get("sharpe_daily"),
+                "metrics_version": stats.get("metrics_version", 1),
                 "vol_annual": float(stats["vol_annual"]),
                 "sharpe_annual": float(stats["sharpe_annual"]),
             }
