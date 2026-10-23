@@ -1,0 +1,142 @@
+{
+  "dataset_version": "20261021T191543_52819bd7",
+  "data_cutoff": "2026-10-20 00:00:00",
+  "calendar_policy": "dates with at least one selected asset observed; reject partial missing marks",
+  "tickers": [
+    "AAPL",
+    "SPY",
+    "TLT"
+  ],
+  "config": {
+    "train_window": 252,
+    "min_train": 252,
+    "rebalance_every": 5,
+    "periods": 252,
+    "commission_bps": 5.0,
+    "transaction_cost_bps": 0.0,
+    "rf_annual_simple": 0.0
+  },
+  "models": {
+    "classic": {
+      "mode": "classic",
+      "min_history": 252,
+      "min_overlap": 126,
+      "seq_len": 40,
+      "epochs": 2,
+      "seed": 42,
+      "lstm_config": {
+        "hidden_sizes": [
+          64,
+          64
+        ],
+        "activation": "relu",
+        "lr": 0.001
+      }
+    },
+    "lstm": {
+      "mode": "lstm",
+      "min_history": 252,
+      "min_overlap": 126,
+      "seq_len": 40,
+      "epochs": 2,
+      "seed": 42,
+      "lstm_config": {
+        "hidden_sizes": [
+          64,
+          64
+        ],
+        "activation": "relu",
+        "lr": 0.001
+      }
+    },
+    "gjr_garch": {
+      "mode": "gjr_garch",
+      "min_history": 252,
+      "min_overlap": 126,
+      "seq_len": 40,
+      "epochs": 2,
+      "seed": 42,
+      "lstm_config": {
+        "hidden_sizes": [
+          64,
+          64
+        ],
+        "activation": "relu",
+        "lr": 0.001
+      }
+    }
+  },
+  "metrics": {
+    "classic": {
+      "measurement": "ex_post",
+      "return_type": "daily_log",
+      "currency": "USD",
+      "periods": 252,
+      "n_observations": 15,
+      "cumulative_simple_return": 0.01246697764311544,
+      "annualized_log_return": 0.20815040052610861,
+      "realized_vol_annual": 0.05858379301468252,
+      "realized_sharpe_annual": 3.553037278995252,
+      "max_drawdown": -0.011110767006708544,
+      "turnover_total": 1.0545908099952614,
+      "turnover_mean_rebalance": 0.35153026999842046
+    },
+    "lstm": {
+      "measurement": "ex_post",
+      "return_type": "daily_log",
+      "currency": "USD",
+      "periods": 252,
+      "n_observations": 15,
+      "cumulative_simple_return": 0.011850926380372329,
+      "annualized_log_return": 0.1979250683161708,
+      "realized_vol_annual": 0.06714881080890502,
+      "realized_sharpe_annual": 2.9475588015912075,
+      "max_drawdown": -0.013997868682491643,
+      "turnover_total": 1.118057914774161,
+      "turnover_mean_rebalance": 0.3726859715913869
+    },
+    "gjr_garch": {
+      "measurement": "ex_post",
+      "return_type": "daily_log",
+      "currency": "USD",
+      "periods": 252,
+      "n_observations": 15,
+      "cumulative_simple_return": 0.009574616049338847,
+      "annualized_log_return": 0.16008837443519422,
+      "realized_vol_annual": 0.07609153869459193,
+      "realized_sharpe_annual": 2.103891933079969,
+      "max_drawdown": -0.01579857580693045,
+      "turnover_total": 1.093625137308267,
+      "turnover_mean_rebalance": 0.364541712436089
+    },
+    "equal_weight": {
+      "measurement": "ex_post",
+      "return_type": "daily_log",
+      "currency": "USD",
+      "periods": 252,
+      "n_observations": 15,
+      "cumulative_simple_return": 0.021457489297002752,
+      "annualized_log_return": 0.35667270995514816,
+      "realized_vol_annual": 0.04018476887223404,
+      "realized_sharpe_annual": 8.87581837509569,
+      "max_drawdown": -0.003509067855814396,
+      "turnover_total": 1.0097308466476915,
+      "turnover_mean_rebalance": 0.33657694888256384
+    },
+    "buy_and_hold": {
+      "measurement": "ex_post",
+      "return_type": "daily_log",
+      "currency": "USD",
+      "periods": 252,
+      "n_observations": 15,
+      "cumulative_simple_return": 0.021296050071231143,
+      "annualized_log_return": 0.3540172951473008,
+      "realized_vol_annual": 0.03997368348534694,
+      "realized_sharpe_annual": 8.856259025442881,
+      "max_drawdown": -0.003460768638704259,
+      "turnover_total": 1.0,
+      "turnover_mean_rebalance": 0.3333333333333333
+    }
+  },
+  "limitations": "Fixed universe; no survivorship correction. Short windows are execution demonstrations, not evidence of performance improvement."
+}
