@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import json
 from pathlib import Path
 import sys
 from typing import Any
@@ -537,6 +538,14 @@ def main() -> None:
         if signals:
             st.dataframe(pd.DataFrame(signals), use_container_width=True, hide_index=True)
         st.json(diagnostics)
+
+    with st.expander("Riesgo estimado y escenarios históricos"):
+        risk = result.get("portfolio_risk", {})
+        st.caption("Ex ante: covarianza estimada. Escenarios: cartera de pesos fijos sobre historia; no son resultados realizados de esta estrategia.")
+        st.json(risk)
+        if risk.get("risk_contributions"):
+            st.dataframe(pd.DataFrame(risk["risk_contributions"]), hide_index=True, use_container_width=True)
+        st.download_button("Exportar métricas de riesgo y unidades",json.dumps(risk,indent=2),"portfolio_risk.json","application/json")
 
     st.subheader("Comparación de carteras")
     comparison_df = build_comparison_df(result)

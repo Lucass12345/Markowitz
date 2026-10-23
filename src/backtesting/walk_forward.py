@@ -36,7 +36,8 @@ def realized_metrics(log_returns, turnover, config):
     vol = float(log_returns.std(ddof=1))
     rf = np.log1p(config.rf_annual_simple) / config.periods
     sharpe = (float(log_returns.mean())-rf)/vol if vol > 0 else np.nan
-    return {'measurement':'ex_post', 'return_type':'daily_log', 'currency':'USD', 'periods':config.periods,
+    from src.portfolio_risk import path_risk
+    return {**path_risk(log_returns), 'measurement':'ex_post', 'return_type':'daily_log', 'currency':'USD', 'periods':config.periods,
             'n_observations':len(log_returns), 'cumulative_simple_return':float(wealth[-1]-1),
             'annualized_log_return':float(log_returns.mean()*config.periods),
             'realized_vol_annual':vol*np.sqrt(config.periods), 'realized_sharpe_annual':annualized_sharpe(sharpe,config.periods),

@@ -98,6 +98,8 @@ def optimize_portfolio_mode(
         "blocks": blocks_result,
     }
 
+    from src.portfolio_risk import estimated_risk
+    result["portfolio_risk"] = estimated_risk(blocks_result["weights_series"], cov, returns, periods, min_overlap)
     from src.optimization.provenance import seal_snapshot
     result["provenance"] = seal_snapshot(returns, meta, mu, cov, result)
     return result
