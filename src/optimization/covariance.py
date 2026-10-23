@@ -81,3 +81,17 @@ def estimate_historical_risk(returns, config=None):
                         "pair_observations": {a: {b: int(overlaps.loc[a,b]) for b in tickers} for a in tickers},
                         "available_dates": len(data), "global_complete_dates": int(eligible.notna().all(axis=1).sum())})
     return eligible, cov, diagnostics
+
+
+def ledoit_wolf_covariance(returns, config=None):
+    """Shrinkage on jointly observed dates only; missing-market returns are never imputed."""
+    from sklearn.covariance import LedoitWolf
+    config = config or RiskConfig()
+    complete = returns.dropna(how="any")
+    if len(complete) < config.min_overlap:
+        raise OptimizationInputError(f"Ledoit-Wolf needs {config.min_overlap} jointly observed dates; found {len(complete)}. Select historical pairwise or increase history.")
+    estimator = LedoitWolf().fit(complete.to_numpy())
+    cov = pd.DataFrame(estimator.covariance_, index=returns.columns, columns=returns.columns)
+    cov, diagnostics = regularize_covariance(cov, config)
+    return cov, {**diagnostics, "estimator": "ledoit_wolf", "joint_observations_used": len(complete),
+                 "shrinkage": float(estimator.shrinkage_), "calendar_policy": "joint_observed_no_imputation"}

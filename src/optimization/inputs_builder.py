@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 from sqlalchemy.exc import SQLAlchemyError
 from src.optimization.errors import OptimizationInputError
-from src.optimization.covariance import RiskConfig, estimate_historical_risk, regularize_covariance
+from src.optimization.covariance import RiskConfig, estimate_historical_risk, regularize_covariance, ledoit_wolf_covariance
 from src.optimization.predictions import PredictionPolicy, checked_predictions, row_reason, require_or_fallback
 from src.optimization.lstm_lab_loader import load_active_lstm_predictions_df
 from src.optimization.mlp_lab_loader import load_active_mlp_predictions
@@ -61,21 +61,28 @@ def _finite_metric(row, key):
     return float(value) if value is not None and np.isfinite(value) else None
 
 
-def build_model_inputs(model_type, returns, risk_config=None, prediction_fallback="historical", max_prediction_age_days=7):
+def build_model_inputs(model_type, returns, risk_config=None, prediction_fallback="historical", max_prediction_age_days=7, covariance_estimator=None):
     model_type = str(model_type).strip().lower()
     if model_type not in {"classic", "ai_returns", "ai_returns_lstm", "ai_volatility"}:
         raise OptimizationInputError(f"Invalid model_type: {model_type}")
     risk_config = risk_config or RiskConfig()
     policy = PredictionPolicy(prediction_fallback, max_prediction_age_days)
     returns, cov, diagnostics = estimate_historical_risk(returns, risk_config)
+    estimator = covariance_estimator or ("gjr_garch" if model_type == "ai_volatility" else "historical")
+    if estimator not in {"historical", "ledoit_wolf", "gjr_garch"}:
+        raise OptimizationInputError(f"Invalid covariance estimator: {estimator}")
+    if estimator == "ledoit_wolf":
+        cov, selected_diagnostics = ledoit_wolf_covariance(returns, risk_config)
+        diagnostics["selected_estimator_diagnostics"] = selected_diagnostics
+    diagnostics["estimator"] = estimator
     mu = returns.mean()
     value_column = "vol_pred" if model_type == "ai_volatility" else "mu_pred"
-    predictions = checked_predictions(_load_signals(model_type), returns, value_column)
+    predictions = checked_predictions(_load_signals(model_type if model_type != "ai_volatility" or estimator == "gjr_garch" else "classic"), returns, value_column)
     vol = pd.Series(np.sqrt(np.diag(cov)), index=cov.index)
     signals = []
     for ticker in returns:
         row = predictions.loc[ticker] if ticker in predictions.index else None
-        reason = "classic_historical" if model_type == "classic" else row_reason(row, returns[ticker], value_column, policy)
+        reason = "classic_historical" if model_type == "classic" or (model_type == "ai_volatility" and estimator != "gjr_garch") else row_reason(row, returns[ticker], value_column, policy)
         if reason is None and model_type == "ai_returns_lstm":
             direction = pd.to_numeric(row.get("dir_acc_val"), errors="coerce")
             amplitude = pd.to_numeric(row.get("amp_ratio"), errors="coerce")
@@ -85,7 +92,7 @@ def build_model_inputs(model_type, returns, risk_config=None, prediction_fallbac
                 reason = "validation_amplitude_below_threshold"
         if reason is None and row is not None and "use_for_optimizer" in row and str(row["use_for_optimizer"]).lower() != "true":
             reason = "producer_validation_rejected"
-        if model_type != "classic":
+        if model_type != "classic" and not (model_type == "ai_volatility" and estimator != "gjr_garch"):
             require_or_fallback(ticker, reason, policy)
         if reason is None:
             if model_type == "ai_volatility":
@@ -101,7 +108,18 @@ def build_model_inputs(model_type, returns, risk_config=None, prediction_fallbac
                 if key in row:
                     signal[key] = str(row[key])
         signals.append(signal)
-    if model_type == "ai_volatility":
+    if estimator == "gjr_garch":
+        if model_type != "ai_volatility":
+            volatility_predictions = checked_predictions(_load_signals("ai_volatility"), returns, "vol_pred")
+            risk_signals = []
+            for ticker in returns:
+                row = volatility_predictions.loc[ticker] if ticker in volatility_predictions.index else None
+                reason = row_reason(row, returns[ticker], "vol_pred", policy)
+                require_or_fallback(ticker, reason, policy)
+                if reason is None:
+                    vol[ticker] = float(row.vol_pred)
+                risk_signals.append({"ticker": ticker, "source": "ai" if reason is None else "historical", "reason": reason or "accepted"})
+            diagnostics["risk_signals"] = risk_signals
         cov = _build_ai_vol_cov(cov, vol)
     cov, final_diagnostics = regularize_covariance(cov, risk_config)
     mu.attrs["input_diagnostics"] = {**diagnostics, "final_covariance": final_diagnostics,

@@ -375,6 +375,8 @@ def sidebar_controls() -> dict:
     n_frontier_points = st.sidebar.slider("Puntos de la frontera", 30, 200, 80, 10)
 
     with st.sidebar.expander("Calidad de datos y predicciones"):
+        covariance_estimator = st.selectbox("Estimador de covarianza", [None, "historical", "ledoit_wolf", "gjr_garch"],
+                                            format_func=lambda x: x or "Predeterminado del modo")
         min_history = st.number_input("Observaciones mínimas por activo", min_value=2, value=252)
         min_overlap = st.number_input("Observaciones mínimas por par", min_value=2, value=126)
         prediction_fallback = st.selectbox("Predicción faltante o inválida", ["historical", "required"],
@@ -404,7 +406,8 @@ def sidebar_controls() -> dict:
 
     return {
         "optimization_options": {"min_history": int(min_history), "min_overlap": int(min_overlap),
-                                 "prediction_fallback": prediction_fallback, "max_prediction_age_days": int(max_prediction_age_days)},
+                                 "prediction_fallback": prediction_fallback, "max_prediction_age_days": int(max_prediction_age_days),
+                                 "covariance_estimator": covariance_estimator},
         "api_base_url": api_base_url,
         "mode": mode,
         "targets": targets,

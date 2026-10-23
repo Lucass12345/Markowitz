@@ -21,6 +21,7 @@ class OptimizeRequest(BaseModel):
     max_psd_adjustment: float = Field(1.0, ge=0, allow_inf_nan=False)
     prediction_fallback: Literal["historical", "required"] = "historical"
     max_prediction_age_days: int = Field(7, ge=0)
+    covariance_estimator: Literal["historical", "ledoit_wolf", "gjr_garch"] | None = None
     run_label: str | None = Field(default=None)
 
     @model_validator(mode="after")

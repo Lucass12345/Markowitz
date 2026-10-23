@@ -20,6 +20,7 @@ def optimize_portfolio_mode(
     max_psd_adjustment: float = 1.0,
     prediction_fallback: str = "historical",
     max_prediction_age_days: int = 7,
+    covariance_estimator: str | None = None,
 ) -> dict:
     """
     Orquestador principal para los 3 modos:
@@ -40,6 +41,7 @@ def optimize_portfolio_mode(
         risk_config=risk_config,
         prediction_fallback=prediction_fallback,
         max_prediction_age_days=max_prediction_age_days,
+        covariance_estimator=covariance_estimator,
     )
 
     blocks = validate_optimizer_inputs(mu, cov, tickers, meta, targets, max_weight)
@@ -76,6 +78,7 @@ def optimize_portfolio_mode(
             "rf_log_daily": rf_log_daily,
             "periods": periods,
             "risk_config": asdict(risk_config),
+            "covariance_estimator": mu.attrs["input_diagnostics"]["estimator"],
             "prediction_fallback": prediction_fallback,
             "max_prediction_age_days": max_prediction_age_days,
             "dataset_version": dataset_dir.name,
