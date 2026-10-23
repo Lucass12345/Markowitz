@@ -163,6 +163,10 @@ def min_variance_return_target(mean_returns, cov_matrix, target_return):
     w0 = np.ones(n) / n
     bounds = tuple((0.0, 1.0) for _ in range(n))
 
+    if np.ptp(mu) < 1e-12:
+        if abs(float(mu[0]) - target_return) > 1e-10:
+            raise ValueError("Infeasible target for equal expected returns")
+        return min_variance(mu, Sigma)
     constraints = (
         {"type": "eq", "fun": lambda w: np.sum(w) - 1.0},
         {"type": "eq", "fun": lambda w, tr=float(target_return): float(w @ mu) - tr},
@@ -190,13 +194,13 @@ def efficient_frontier(mean_returns, cov_matrix, n_points=80):
     mu = np.asarray(mean_returns)
     Sigma = np.asarray(cov_matrix)
 
-    w_min = extreme_return(mu, maximize=False)
+    w_min = min_variance(mu, Sigma)
     w_max = extreme_return(mu, maximize=True)
 
     r_min = portfolio_return(w_min, mu)
     r_max = portfolio_return(w_max, mu)
 
-    grid = np.linspace(r_min, r_max, n_points)
+    grid = [r_min] if r_max - r_min < 1e-12 else np.linspace(r_min, r_max, n_points)
 
     pts = []
     for tr in grid:

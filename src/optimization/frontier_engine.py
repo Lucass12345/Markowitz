@@ -32,12 +32,14 @@ def _clean_frontier(frontier_pts, periods: int = 252) -> pd.DataFrame:
     # anualizar
     annualized = [
         annualize_log(r, v, periods=periods)
-        for v, r in frontier_pts
+        for v, r in df[["vol_daily", "return_daily"]].itertuples(index=False, name=None)
     ]
     df["return_annual"] = [x[0] for x in annualized]
     df["vol_annual"] = [x[1] for x in annualized]
 
     df["return_log_annual"] = df["return_annual"]
+    if df.empty:
+        return df
     # ordenar por volatilidad
     df = df.sort_values("vol_annual").reset_index(drop=True)
 
@@ -102,3 +104,37 @@ def run_frontier(
             "stats": stats_max,
         },
     }
+
+def check_frontier_weights(weights, mu, blocks, targets, max_weight, min_return=None, tolerance=1e-7):
+    w = np.asarray(weights, dtype=float)
+    if not np.isfinite(w).all() or abs(w.sum() - 1) > tolerance or w.min() < -tolerance or w.max() > max_weight + tolerance:
+        return False
+    if any(abs(w[blocks[name]].sum() - target) > tolerance for name, target in targets.items()):
+        return False
+    return min_return is None or float(w @ np.asarray(mu)) >= min_return - tolerance
+
+
+def run_constrained_frontier(mu, cov, blocks, targets, max_weight=1., periods=252, n_points=80):
+    """Upper efficient branch with the exact allocation constraints of the portfolio."""
+    from src.markowitz import min_variance_with_blocks, extreme_return_with_blocks, min_variance_with_blocks_min_return
+    minimum = min_variance_with_blocks(cov, blocks, targets, max_weight)
+    maximum = extreme_return_with_blocks(mu, blocks, targets, max_weight=max_weight)
+    for result in (minimum, maximum):
+        if not result.success or not check_frontier_weights(result.x, mu, blocks, targets, max_weight):
+            raise RuntimeError(f"Constrained frontier endpoint did not converge: {result.message}")
+    lower, upper = float(np.asarray(mu) @ minimum.x), float(np.asarray(mu) @ maximum.x)
+    grid = [lower] if upper - lower < 1e-12 else np.linspace(lower, upper, n_points)
+    rows, failed = [], []
+    for target in grid:
+        result = minimum if abs(target - lower) < 1e-14 else min_variance_with_blocks_min_return(cov, mu, blocks, targets, target, max_weight)
+        if not result.success or not check_frontier_weights(result.x, mu, blocks, targets, max_weight, target):
+            failed.append({"target_return_daily": float(target), "message": str(result.message)})
+            continue
+        ret = float(np.asarray(mu) @ result.x)
+        vol = float(np.sqrt(result.x @ np.asarray(cov) @ result.x))
+        rows.append({"return_daily": ret, "return_annual": ret * periods, "return_log_annual": ret * periods,
+                     "vol_daily": vol, "vol_annual": vol * np.sqrt(periods), "weights": result.x.tolist()})
+    if not rows:
+        raise RuntimeError("Constrained frontier has no verified feasible points")
+    return {"points": pd.DataFrame(rows), "diagnostics": {"requested_points": len(grid), "accepted_points": len(rows), "failed_points": failed,
+            "constraints": {"targets": targets, "max_weight": max_weight, "long_only": True, "budget": 1.}, "tickers": list(mu.index)}}

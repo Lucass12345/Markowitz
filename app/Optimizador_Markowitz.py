@@ -135,11 +135,16 @@ def build_frontier_figure(result: dict) -> go.Figure:
                 x=frontier_df["vol_annual"],
                 y=frontier_df["return_annual"],
                 mode="lines",
-                name="Frontera eficiente",
+                name="Frontera clásica (long-only, sin bloques ni tope)",
                 line=dict(width=3),
                 hovertemplate="Volatilidad: %{x:.2%}<br>Retorno: %{y:.2%}<extra></extra>",
             )
         )
+
+    constrained = pd.DataFrame(result.get("constrained_frontier", {}).get("points", []))
+    if not constrained.empty:
+        fig.add_trace(go.Scatter(x=constrained.vol_annual, y=constrained.return_log_annual,
+                                mode="lines", name="Frontera con bloques y tope", line=dict(width=3, dash="dash")))
 
     fig.add_trace(
         go.Scatter(

@@ -4,7 +4,7 @@ from src.markowitz import rf_simple_annual_to_log_daily
 from src.data.load_data import load_returns, load_metadata, active_data_dir
 from src.optimization.inputs_builder import build_model_inputs
 from src.optimization.covariance import RiskConfig
-from src.optimization.frontier_engine import run_frontier
+from src.optimization.frontier_engine import run_frontier, run_constrained_frontier
 from src.optimization.optimize_blocks import run_blocks_optimizer, validate_optimizer_inputs
 
 def optimize_portfolio_mode(
@@ -42,7 +42,7 @@ def optimize_portfolio_mode(
         max_prediction_age_days=max_prediction_age_days,
     )
 
-    validate_optimizer_inputs(mu, cov, tickers, meta, targets, max_weight)
+    blocks = validate_optimizer_inputs(mu, cov, tickers, meta, targets, max_weight)
     if hasattr(cov, "loc"):
         cov = cov.loc[tickers, tickers]
 
@@ -53,6 +53,8 @@ def optimize_portfolio_mode(
         periods=periods,
         n_points=n_frontier_points,
     )
+
+    constrained = run_constrained_frontier(mu, cov, blocks, targets, max_weight, periods, n_frontier_points)
 
     blocks_result = run_blocks_optimizer(
         mu=mu,
@@ -81,6 +83,7 @@ def optimize_portfolio_mode(
         },
         "diagnostics": {"risk": mu.attrs.get("input_diagnostics", {})},
         "frontier": frontier_result["frontier"],
+        "constrained_frontier": constrained,
         "minvar": frontier_result["minvar"],
         "maxsharpe": frontier_result["maxsharpe"],
         "blocks": blocks_result,
