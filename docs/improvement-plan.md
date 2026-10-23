@@ -67,3 +67,9 @@ retroactivamente evidencia que nunca se guardó. Respaldar tanto PostgreSQL como
 volumen `storage/optimization_snapshots`. MLflow y MinIO registran estados separados;
 un fallo de MinIO conserva el identificador exitoso de MLflow. Las pruebas verifican
 integraciones con dobles; no se ha probado conectividad real con esos servicios.
+
+CI agregado para pruebas offline, lint de errores y compilación. Verificación al cerrar P1:
+**139 pruebas aprobadas**, Ruff sin errores y compileall correcto. La prueba HTTP ejecuta
+una optimización sintética completa y comprueba HTTP 422 ante capacidad insuficiente.
+Se reemplazó un módulo de servicio obsoleto que ejecutaba nombres indefinidos al importar
+por una reexportación compatible. JSON convierte NaN/infinito a null en API, SQL y snapshots.
