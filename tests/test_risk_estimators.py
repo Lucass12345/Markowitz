@@ -32,3 +32,21 @@ def test_garch_can_be_selected_for_classic_returns(monkeypatch):
     assert np.sqrt(cov.loc['A','A'])==pytest.approx(.02)
     assert np.sqrt(cov.loc['B','B'])==pytest.approx(data.B.std())
     assert tickers==['A','B']
+
+
+def test_return_and_garch_model_ids_survive_into_snapshot(tmp_path,monkeypatch):
+    from src.optimization import inputs_builder
+    from src.optimization.provenance import seal_snapshot
+    data=pd.DataFrame(np.random.default_rng(3).normal(0,.01,size=(20,2)),columns=['A','B'],index=pd.bdate_range('2024-01-01',periods=20))
+    data.attrs['dataset_version']='v1'
+    def predictions(mode):
+        if mode=='classic':return pd.DataFrame()
+        row={'ticker':'A','as_of':str(data.index[-1]),'dataset_version':'v1','base_currency':'USD'}
+        if mode=='ai_volatility':row.update(vol_pred=.02,model_run_id='garch-456')
+        else:row.update(mu_pred=.001,model_run_id='lstm-123',dir_acc_val=.6,amp_ratio=.4)
+        return pd.DataFrame([row])
+    monkeypatch.setattr(inputs_builder,'_load_signals',predictions)
+    mu,cov,_=build_model_inputs('ai_returns_lstm',data,RiskConfig(10,10),covariance_estimator='gjr_garch')
+    result={'inputs':{'dataset_version':'v1'},'diagnostics':{'risk':mu.attrs['input_diagnostics']}}
+    provenance=seal_snapshot(data,pd.DataFrame({'ticker':['A','B'],'block':['OTHER','OTHER']}),mu,cov,result,root=tmp_path)
+    assert {model['model_run_id'] for model in provenance['models']}=={'lstm-123','garch-456'}

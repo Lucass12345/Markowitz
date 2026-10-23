@@ -127,7 +127,8 @@ def build_model_inputs(model_type, returns, risk_config=None, prediction_fallbac
                 require_or_fallback(ticker, reason, policy)
                 if reason is None:
                     vol[ticker] = float(row.vol_pred)
-                risk_signals.append({"ticker": ticker, "source": "ai" if reason is None else "historical", "reason": reason or "accepted"})
+                risk_signals.append({"ticker": ticker, "source": "ai" if reason is None else "historical", "reason": reason or "accepted",
+                                     **{key: str(row[key]) for key in ("model_run_id", "model_source", "dataset_version", "as_of") if row is not None and key in row}})
             diagnostics["risk_signals"] = risk_signals
         cov = _build_ai_vol_cov(cov, vol)
     cov, final_diagnostics = regularize_covariance(cov, risk_config)

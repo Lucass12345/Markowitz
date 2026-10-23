@@ -16,6 +16,8 @@ def train_all_return_models_lstm(seq_len=40, forecast_horizon=5, epochs=80,
                           dropout=dropout, patience=patience, candidates=candidates,
                           start_date="full", persist_db=False, feature_search=selected_features is None)
     predictions = result["predictions"].merge(result["metrics"].drop(columns=["mu_pred"], errors="ignore"), on="ticker")
+    predictions["model_run_id"] = result["run_id"]
+    predictions["prediction_units"] = "daily_log_return"
     if predictions.empty:
         raise RuntimeError(f"No LSTM forecasts generated; inspect {result['metrics_path']}")
     output = Path(__file__).resolve().parents[2] / "outputs" / "predictions"

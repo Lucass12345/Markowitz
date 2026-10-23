@@ -29,7 +29,7 @@ def seal_snapshot(returns, metadata, mu, cov, result, root=None):
     root.mkdir(parents=True,exist_ok=True)
     provenance={'dataset_version':returns.attrs.get('dataset_version',result['inputs']['dataset_version']),
                 'data_cutoff':returns.index.max().isoformat(),'base_currency':'USD','code':code_version(),
-                'models':[signal for signal in result['diagnostics']['risk'].get('signals',[]) if signal['source']=='ai'],
+                'models':[signal for signal in (result['diagnostics']['risk'].get('signals',[])+result['diagnostics']['risk'].get('risk_signals',[])) if signal['source']=='ai'],
                 'effective_configuration':result['inputs']}
     files={'returns.csv':returns.to_csv().encode(),'assets_metadata.csv':metadata.to_csv(index=False).encode(),
            'mu.csv':mu.to_csv().encode(),'covariance.csv':cov.to_csv().encode(),
