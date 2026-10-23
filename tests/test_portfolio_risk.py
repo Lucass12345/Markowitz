@@ -28,3 +28,13 @@ def test_scenarios_insufficient_joint_calendar_do_not_invent_returns():
     result=estimated_risk(pd.Series([.5,.5],index=['A','B']),np.eye(2)*.01,data,min_joint_observations=2)
     assert result['historical_scenario']['n_joint_observations']==0
     assert 'var_historical' not in result['historical_scenario']
+
+
+def test_covariance_labels_are_aligned_for_risk_contributions():
+    weights=pd.Series([.9,.1],index=['A','B'])
+    cov=pd.DataFrame(np.diag([.0001,.04]),index=weights.index,columns=weights.index)
+    original=estimated_risk(weights,cov)
+    reordered=estimated_risk(weights,cov.loc[['B','A'],['B','A']])
+    assert original==reordered
+    with pytest.raises(ValueError,match='labels'):
+        estimated_risk(weights,cov.rename(index={'B':'C'},columns={'B':'C'}))

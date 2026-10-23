@@ -50,8 +50,8 @@ def walk_forward(returns, estimator=None, config=None, strategy='model'):
     data=returns.copy().astype(float)
     if not isinstance(data.index,pd.DatetimeIndex) or not data.index.is_monotonic_increasing or data.index.has_duplicates or data.columns.has_duplicates:
         raise ValueError('Backtest requires sorted unique dates and tickers')
-    if len(data)<=config.min_train or data.empty or np.isinf(data.to_numpy()).any():
-        raise ValueError('Insufficient or invalid backtest returns')
+    if len(data)<config.min_train+2 or data.empty or np.isinf(data.to_numpy()).any():
+        raise ValueError('Backtest requires at least two OOS returns and valid training data')
     if strategy not in {'model','equal_weight','buy_and_hold'} or (strategy=='model' and estimator is None):
         raise ValueError('Invalid backtest strategy/estimator')
     current=pd.Series(0.,index=data.columns)

@@ -21,6 +21,8 @@ def path_risk(log_returns, confidence=.95):
 
 
 def estimated_risk(weights, cov, returns=None, periods=252, min_joint_observations=126, confidence=.95):
+    from src.markowitz import _align_mu_sigma
+    weights, cov = _align_mu_sigma(weights, cov)
     w=np.asarray(weights,dtype=float)
     matrix=np.asarray(cov,dtype=float)
     sigma=float(np.sqrt(w@matrix@w))

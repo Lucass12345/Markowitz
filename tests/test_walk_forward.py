@@ -56,3 +56,9 @@ def test_comparison_shares_oos_dates_and_counts_initial_drawdown():
     results=compare_strategies(data,{'classic':lambda history:pd.Series([.5,.5],index=history.columns)},BacktestConfig(10,10,5))
     assert set(results)=={'classic','equal_weight','buy_and_hold'}
     assert results['classic']['metrics']['max_drawdown']==pytest.approx(np.exp(-.2)-1)
+
+
+def test_single_oos_observation_rejected_before_estimation():
+    data=pd.DataFrame({'A':[0.,0.,.01]},index=pd.bdate_range('2024-01-01',periods=3))
+    with pytest.raises(ValueError,match='two OOS'):
+        walk_forward(data,config=BacktestConfig(2,2),strategy='equal_weight')
