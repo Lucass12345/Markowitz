@@ -22,6 +22,7 @@ def load_returns(data_dir=None):
     df = pd.read_csv(directory / "returns.csv", index_col=0, parse_dates=True)
     df = df.sort_index()
     df.columns = df.columns.astype(str).str.strip()
+    df.attrs.update(dataset_version=directory.name, base_currency="USD", dataset_dir=str(directory))
     return df
 
 

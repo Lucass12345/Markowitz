@@ -4,7 +4,7 @@ from pathlib import Path
 import pandas as pd
 import json
 
-from src.data.load_data import assert_current_dataset
+from sqlalchemy.exc import SQLAlchemyError
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -45,9 +45,9 @@ def load_active_lstm_predictions_df() -> pd.DataFrame:
         forecast_file = Path(directory) / "predictions.csv" if directory else None
         if forecast_file and forecast_file.exists():
             extra = pd.read_csv(forecast_file)
-            columns = [c for c in ["dataset_version", "use_for_optimizer"] if c in extra and c not in preds]
+            columns = [c for c in ["dataset_version", "use_for_optimizer", "as_of", "base_currency", "forecast_horizon", "prediction_units"] if c in extra and c not in preds]
             if columns:
-                preds = preds.merge(extra[["ticker"] + columns], on="ticker", how="left")
+                preds = preds.merge(extra[["ticker"] + columns], on="ticker", how="left", validate="one_to_one")
         return preds
 
     # Honor an explicitly active, current laboratory run; otherwise use automation.
@@ -57,20 +57,20 @@ def load_active_lstm_predictions_df() -> pd.DataFrame:
         active = get_active_prediction_run()
         if active:
             run_output_dir = active.get("local_run_output_dir")
-            preds = provenance(load_active_predictions_df().copy(), run_output_dir)
-            assert_current_dataset(preds)
+            preds = provenance(load_active_predictions_df(run_id=active["run_id"]).copy(), run_output_dir)
             if not preds.empty:
+                preds["model_run_id"] = active["run_id"]
                 amp = _compute_amp_ratio_from_run_dir(run_output_dir)
-                return preds.merge(amp, on="ticker", how="left") if not amp.empty else preds.assign(amp_ratio=float("nan"))
-    except Exception as exc:
+                return preds.merge(amp, on="ticker", how="left", validate="one_to_one") if not amp.empty else preds.assign(amp_ratio=float("nan"))
+    except (ImportError, SQLAlchemyError, ConnectionError) as exc:
         database_error = exc
 
     local = ROOT / "outputs" / "predictions" / "return_predictions_lstm.csv"
     pointer = local.parent / "lstm_production.json"
     if not local.exists() or not pointer.exists():
-        raise ValueError("No hay predicciones LSTM vigentes. Ejecutá el entrenamiento del laboratorio o la automatización.") from database_error
+        raise FileNotFoundError("No hay predicciones LSTM vigentes. Ejecutá el entrenamiento del laboratorio o la automatización.") from database_error
     info = json.loads(pointer.read_text(encoding="utf-8"))
     preds = pd.read_csv(local)
-    assert_current_dataset(preds)
+    preds["model_run_id"] = info.get("run_id", Path(info["run_output_dir"]).name)
     amp = _compute_amp_ratio_from_run_dir(info["run_output_dir"])
-    return preds.merge(amp, on="ticker", how="left") if not amp.empty else preds.assign(amp_ratio=float("nan"))
+    return preds.merge(amp, on="ticker", how="left", validate="one_to_one") if not amp.empty else preds.assign(amp_ratio=float("nan"))

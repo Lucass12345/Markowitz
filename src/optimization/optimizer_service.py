@@ -18,6 +18,8 @@ def optimize_portfolio_mode(
     min_overlap: int = 126,
     eigenvalue_floor: float = 1e-8,
     max_psd_adjustment: float = 1.0,
+    prediction_fallback: str = "historical",
+    max_prediction_age_days: int = 7,
 ) -> dict:
     """
     Orquestador principal para los 3 modos:
@@ -36,6 +38,8 @@ def optimize_portfolio_mode(
         model_type=model_type,
         returns=returns,
         risk_config=risk_config,
+        prediction_fallback=prediction_fallback,
+        max_prediction_age_days=max_prediction_age_days,
     )
 
     validate_optimizer_inputs(mu, cov, tickers, meta, targets, max_weight)
@@ -70,6 +74,8 @@ def optimize_portfolio_mode(
             "rf_log_daily": rf_log_daily,
             "periods": periods,
             "risk_config": asdict(risk_config),
+            "prediction_fallback": prediction_fallback,
+            "max_prediction_age_days": max_prediction_age_days,
             "dataset_version": dataset_dir.name,
             "base_currency": "USD",
         },

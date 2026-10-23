@@ -353,12 +353,12 @@ def get_active_prediction_run() -> dict | None:
     return dict(row) if row else None
 
 
-def load_active_predictions_df() -> pd.DataFrame:
-    active = get_active_prediction_run()
-    if not active:
-        return pd.DataFrame(columns=["ticker", "mu_pred"])
-
-    run_id = active["run_id"]
+def load_active_predictions_df(run_id: str | None = None) -> pd.DataFrame:
+    if run_id is None:
+        active = get_active_prediction_run()
+        if not active:
+            return pd.DataFrame(columns=["ticker", "mu_pred"])
+        run_id = active["run_id"]
 
     ensure_lstm_lab_tables()
     with engine.begin() as conn:

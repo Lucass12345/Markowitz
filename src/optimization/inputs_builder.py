@@ -1,148 +1,109 @@
-from __future__ import annotations
-
 from pathlib import Path
 import numpy as np
 import pandas as pd
-
-from src.data.load_data import assert_current_dataset
+from sqlalchemy.exc import SQLAlchemyError
+from src.optimization.errors import OptimizationInputError
 from src.optimization.covariance import RiskConfig, estimate_historical_risk, regularize_covariance
+from src.optimization.predictions import PredictionPolicy, checked_predictions, row_reason, require_or_fallback
 from src.optimization.lstm_lab_loader import load_active_lstm_predictions_df
 from src.optimization.mlp_lab_loader import load_active_mlp_predictions
 
 ROOT = Path(__file__).resolve().parents[2]
 PRED_DIR = ROOT / "outputs" / "predictions"
-LSTM_DIR_ACC_MIN = 0.52
-LSTM_AMP_RATIO_MIN = 0.15
+LSTM_DIR_ACC_MIN = .52
+LSTM_AMP_RATIO_MIN = .15
 
 
-def _read_prediction_csv(filename: str) -> pd.DataFrame:
+def _read_prediction_csv(filename):
     path = PRED_DIR / filename
     if not path.exists():
-        raise FileNotFoundError(f"No existe {path}. Generalo primero desde el pipeline correspondiente.")
-    df = pd.read_csv(path)
-    if "ticker" not in df.columns:
-        raise ValueError(f"{filename} debe contener la columna 'ticker'.")
-    assert_current_dataset(df)
-    df["ticker"] = df["ticker"].astype(str).str.strip()
-    return df
+        raise FileNotFoundError(f"No existe {path}")
+    return pd.read_csv(path)
 
 
-def load_predictions(prediction_file: str = "predictions.csv") -> pd.DataFrame:
+def load_predictions(prediction_file="predictions.csv"):
     return _read_prediction_csv(prediction_file)
 
 
-def load_volatility_predictions(prediction_file: str = "volatility_predictions.csv") -> pd.DataFrame:
-    preds = _read_prediction_csv(prediction_file)
-    required_cols = {"ticker", "vol_pred"}
-    missing = required_cols - set(preds.columns)
-    if missing:
-        raise ValueError(f"{prediction_file} no tiene columnas requeridas: {sorted(missing)}")
-    assert_current_dataset(preds)
-    preds["vol_pred"] = preds["vol_pred"].astype(float)
-    preds = preds.dropna(subset=["vol_pred"]).copy()
-    preds = preds.drop_duplicates(subset=["ticker"], keep="last").copy()
-    return preds
+def load_volatility_predictions(prediction_file="volatility_predictions.csv"):
+    return _read_prediction_csv(prediction_file)
 
 
-def _build_ai_vol_cov(returns_subset: pd.DataFrame, pred_vol: pd.Series) -> pd.DataFrame:
-    hist_cov = returns_subset.cov()
-    hist_vol = returns_subset.std().replace(0, np.nan)
-    corr = hist_cov.div(hist_vol, axis=0).div(hist_vol, axis=1)
-    corr = corr.replace([np.inf, -np.inf], np.nan).fillna(0.0)
-    d = pd.Series(pred_vol, index=returns_subset.columns, dtype=float)
-    cov_ai = corr.mul(d, axis=0).mul(d, axis=1)
-    return (cov_ai + cov_ai.T) / 2.0
+def _load_signals(mode):
+    if mode == "classic":
+        return pd.DataFrame()
+    try:
+        if mode == "ai_returns_lstm":
+            return load_active_lstm_predictions_df()
+        if mode == "ai_volatility":
+            return load_volatility_predictions()
+        if mode == "ai_returns":
+            try:
+                predictions = load_active_mlp_predictions(validate_current=False)
+            except (ImportError, SQLAlchemyError):
+                predictions = pd.DataFrame()
+            return predictions if not predictions.empty else load_predictions()
+    except FileNotFoundError:
+        return pd.DataFrame()
+    except ValueError as exc:
+        raise OptimizationInputError(str(exc)) from exc
+    raise OptimizationInputError(f"Invalid model_type: {mode}")
 
 
-def _build_ai_returns_from_active_mlp(returns: pd.DataFrame):
-    preds = load_active_mlp_predictions().copy()
-    if preds.empty:
-        raise ValueError("No hay un run activo de MLP Lab para usar en ai_returns.")
-    preds["ticker"] = preds["ticker"].astype(str).str.strip()
-    preds = preds.drop_duplicates(subset=["ticker"], keep="last").set_index("ticker")
-    if "mu_pred" not in preds.columns:
-        raise ValueError("Active MLP Lab predictions must contain column 'mu_pred'.")
-    common = [t for t in returns.columns if t in preds.index]
-    if not common:
-        raise ValueError("No hay tickers en común entre returns.csv y el run activo de MLP Lab.")
-    returns_sub = returns[common].copy()
-    preds = preds.loc[common].copy()
-    hist_mu = returns_sub.mean()
-    mu = hist_mu.copy()
-    use_mask = preds["use_for_optimizer"].astype(bool) if "use_for_optimizer" in preds.columns else pd.Series(True, index=preds.index)
-    mu.loc[use_mask.index[use_mask]] = preds.loc[use_mask, "mu_pred"].astype(float)
-    cov = returns_sub.cov()
-    return mu.loc[common], cov.loc[common, common], common
+def _build_ai_vol_cov(historical_cov, pred_vol):
+    historical_vol = np.sqrt(np.diag(historical_cov))
+    corr = historical_cov / np.outer(historical_vol, historical_vol)
+    return corr.mul(pred_vol, axis=0).mul(pred_vol, axis=1)
 
 
-def build_model_inputs(model_type: str, returns: pd.DataFrame, risk_config: RiskConfig | None = None):
+def _finite_metric(row, key):
+    value = pd.to_numeric(row.get(key), errors="coerce") if row is not None else np.nan
+    return float(value) if value is not None and np.isfinite(value) else None
+
+
+def build_model_inputs(model_type, returns, risk_config=None, prediction_fallback="historical", max_prediction_age_days=7):
     model_type = str(model_type).strip().lower()
-    returns = returns.copy()
-    returns.columns = returns.columns.astype(str).str.strip()
+    if model_type not in {"classic", "ai_returns", "ai_returns_lstm", "ai_volatility"}:
+        raise OptimizationInputError(f"Invalid model_type: {model_type}")
     risk_config = risk_config or RiskConfig()
-    returns, historical_cov, diagnostics = estimate_historical_risk(returns, risk_config)
-
-    def finish(mu, cov, tickers):
-        cov, final_diagnostics = regularize_covariance(cov, risk_config)
-        mu.attrs["input_diagnostics"] = {**diagnostics, "final_covariance": final_diagnostics}
-        return mu, cov, tickers
-
-    if model_type == "classic":
-        mu = returns.mean()
-        return finish(mu, historical_cov, list(mu.index))
-
-    if model_type == "ai_returns":
-        try:
-            return finish(*_build_ai_returns_from_active_mlp(returns))
-        except Exception:
-            preds = load_predictions("predictions.csv").set_index("ticker")
-            if "mu_pred" not in preds.columns:
-                raise ValueError("predictions.csv debe contener columna 'mu_pred'")
-            common = [t for t in returns.columns if t in preds.index]
-            if not common:
-                raise ValueError("No hay tickers en común entre returns.csv y predictions.csv")
-            returns_sub = returns[common].copy()
-            mu = preds.loc[common, "mu_pred"].astype(float)
-            cov = returns_sub.cov()
-            return finish(mu, cov, common)
-
-    if model_type == "ai_returns_lstm":
-        preds = load_active_lstm_predictions_df().copy()
-        assert_current_dataset(preds)
-        preds["ticker"] = preds["ticker"].astype(str).str.strip()
-        preds = preds.set_index("ticker")
-        if "mu_pred" not in preds.columns:
-            raise ValueError("Active LSTM Lab predictions must contain column 'mu_pred'")
-        if "dir_acc_val" not in preds.columns:
-            raise ValueError("Active LSTM Lab predictions must contain column 'dir_acc_val'")
-        if "amp_ratio" not in preds.columns:
-            raise ValueError("Active LSTM Lab predictions must contain column 'amp_ratio'")
-        common = [t for t in returns.columns if t in preds.index]
-        if not common:
-            raise ValueError("No active LSTM Lab predictions available for optimizer universe.")
-        returns_sub = returns[common].copy()
-        preds = preds.loc[common].copy()
-        hist_mu = returns_sub.mean()
-        mu = hist_mu.copy()
-        good_mask = (
-            (preds["dir_acc_val"].astype(float) > LSTM_DIR_ACC_MIN)
-            & (preds["amp_ratio"].astype(float) > LSTM_AMP_RATIO_MIN)
-        )
-        if "use_for_optimizer" in preds:
-            good_mask &= preds["use_for_optimizer"].fillna(False).astype(str).str.lower().eq("true")
-        mu.loc[good_mask.index[good_mask]] = preds.loc[good_mask, "mu_pred"].astype(float)
-        cov = returns_sub.cov()
-        return finish(mu.loc[common], cov.loc[common, common], common)
-
+    policy = PredictionPolicy(prediction_fallback, max_prediction_age_days)
+    returns, cov, diagnostics = estimate_historical_risk(returns, risk_config)
+    mu = returns.mean()
+    value_column = "vol_pred" if model_type == "ai_volatility" else "mu_pred"
+    predictions = checked_predictions(_load_signals(model_type), returns, value_column)
+    vol = pd.Series(np.sqrt(np.diag(cov)), index=cov.index)
+    signals = []
+    for ticker in returns:
+        row = predictions.loc[ticker] if ticker in predictions.index else None
+        reason = "classic_historical" if model_type == "classic" else row_reason(row, returns[ticker], value_column, policy)
+        if reason is None and model_type == "ai_returns_lstm":
+            direction = pd.to_numeric(row.get("dir_acc_val"), errors="coerce")
+            amplitude = pd.to_numeric(row.get("amp_ratio"), errors="coerce")
+            if not np.isfinite(direction) or not direction > LSTM_DIR_ACC_MIN:
+                reason = "validation_direction_below_threshold"
+            elif not np.isfinite(amplitude) or not amplitude > LSTM_AMP_RATIO_MIN:
+                reason = "validation_amplitude_below_threshold"
+        if reason is None and row is not None and "use_for_optimizer" in row and str(row["use_for_optimizer"]).lower() != "true":
+            reason = "producer_validation_rejected"
+        if model_type != "classic":
+            require_or_fallback(ticker, reason, policy)
+        if reason is None:
+            if model_type == "ai_volatility":
+                vol[ticker] = float(row[value_column])
+            else:
+                mu[ticker] = float(row[value_column])
+        signal = {"ticker": ticker, "source": "ai" if reason is None else "historical", "reason": reason or "accepted",
+                  "as_of": str(row.get("as_of")) if row is not None else None,
+                  "dir_acc_val": _finite_metric(row, "dir_acc_val"),
+                  "amp_ratio": _finite_metric(row, "amp_ratio")}
+        if row is not None:
+            for key in ("model_run_id", "model_source", "dataset_version"):
+                if key in row:
+                    signal[key] = str(row[key])
+        signals.append(signal)
     if model_type == "ai_volatility":
-        preds = load_volatility_predictions("volatility_predictions.csv").set_index("ticker")
-        common = [t for t in returns.columns if t in preds.index]
-        if not common:
-            raise ValueError("No hay tickers en común entre returns.csv y volatility_predictions.csv")
-        returns_sub = returns[common].copy()
-        mu = returns_sub.mean()
-        pred_vol = preds.loc[common, "vol_pred"].astype(float)
-        cov = _build_ai_vol_cov(returns_sub, pred_vol)
-        return finish(mu.loc[common], cov.loc[common, common], common)
-
-    raise ValueError(f"model_type inválido: {model_type}. Usá 'classic', 'ai_returns', 'ai_returns_lstm' o 'ai_volatility'.")
+        cov = _build_ai_vol_cov(cov, vol)
+    cov, final_diagnostics = regularize_covariance(cov, risk_config)
+    mu.attrs["input_diagnostics"] = {**diagnostics, "final_covariance": final_diagnostics,
+                                    "signals": signals, "prediction_policy": {"fallback": policy.fallback, "max_age_days": policy.max_age_days}}
+    return mu, cov, list(mu.index)

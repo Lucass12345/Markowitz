@@ -19,6 +19,8 @@ class OptimizeRequest(BaseModel):
     min_overlap: int = Field(126, ge=2)
     eigenvalue_floor: float = Field(1e-8, gt=0, lt=1)
     max_psd_adjustment: float = Field(1.0, ge=0, allow_inf_nan=False)
+    prediction_fallback: Literal["historical", "required"] = "historical"
+    max_prediction_age_days: int = Field(7, ge=0)
     run_label: str | None = Field(default=None)
 
     @model_validator(mode="after")

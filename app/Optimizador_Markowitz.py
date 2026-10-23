@@ -265,6 +265,7 @@ def call_optimize_api(
     rf_annual_simple: float,
     n_frontier_points: int,
     run_label: str,
+    optimization_options: dict | None = None,
 ) -> dict:
     payload = {
         "model_type": model_type,
@@ -275,6 +276,7 @@ def call_optimize_api(
         "run_label": run_label,
     }
 
+    payload.update(optimization_options or {})
     response = requests.post(
         f"{api_base_url}/optimize",
         json=payload,
@@ -361,6 +363,13 @@ def sidebar_controls() -> dict:
     )
     n_frontier_points = st.sidebar.slider("Puntos de la frontera", 30, 200, 80, 10)
 
+    with st.sidebar.expander("Calidad de datos y predicciones"):
+        min_history = st.number_input("Observaciones mínimas por activo", min_value=2, value=252)
+        min_overlap = st.number_input("Observaciones mínimas por par", min_value=2, value=126)
+        prediction_fallback = st.selectbox("Predicción faltante o inválida", ["historical", "required"],
+                                            format_func=lambda x: "Usar estimación histórica" if x == "historical" else "Exigir señal IA para todos")
+        max_prediction_age_days = st.number_input("Antigüedad máxima respecto del corte (días)", min_value=0, value=7)
+
     run_label = st.sidebar.text_input(
         "Etiqueta de corrida",
         value=f"{mode}_streamlit_run",
@@ -383,6 +392,8 @@ def sidebar_controls() -> dict:
     )
 
     return {
+        "optimization_options": {"min_history": int(min_history), "min_overlap": int(min_overlap),
+                                 "prediction_fallback": prediction_fallback, "max_prediction_age_days": int(max_prediction_age_days)},
         "api_base_url": api_base_url,
         "mode": mode,
         "targets": targets,
@@ -460,6 +471,7 @@ def main() -> None:
                     rf_annual_simple=float(controls["rf_annual_simple"]),
                     n_frontier_points=int(controls["n_frontier_points"]),
                     run_label=controls["run_label"],
+                    optimization_options=controls["optimization_options"],
                 )
 
             st.session_state["last_api_response"] = api_response
@@ -501,6 +513,13 @@ def main() -> None:
         render_metric_card("Sharpe anualizado", f"{block_stats['sharpe_annual']:.3f}")
 
     st.plotly_chart(build_frontier_figure(result), use_container_width=True)
+
+    with st.expander("Diagnóstico del universo, calendarios y señales"):
+        diagnostics = result.get("diagnostics", {})
+        signals = diagnostics.get("signals", diagnostics.get("risk", {}).get("signals", []))
+        if signals:
+            st.dataframe(pd.DataFrame(signals), use_container_width=True, hide_index=True)
+        st.json(diagnostics)
 
     st.subheader("Comparación de carteras")
     comparison_df = build_comparison_df(result)

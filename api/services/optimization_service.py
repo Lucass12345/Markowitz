@@ -66,7 +66,7 @@ def run_optimization(payload: dict, save_to_db: bool = True, track_to_mlflow: bo
         max_weight=payload["max_weight"],
         rf_annual_simple=payload["rf_annual_simple"],
         n_frontier_points=payload["n_frontier_points"],
-        **{name: payload[name] for name in ("min_history", "min_overlap", "eigenvalue_floor", "max_psd_adjustment") if name in payload},
+        **{name: payload[name] for name in ("min_history", "min_overlap", "eigenvalue_floor", "max_psd_adjustment", "prediction_fallback", "max_prediction_age_days") if name in payload},
     )
 
     run_id = None
