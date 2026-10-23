@@ -3,3 +3,13 @@ notebooks/
 mlruns/
 **/__pycache__/
 *.pyc
+
+.venv/
+.env
+.env.*
+!.env.production.example
+storage/
+.pytest_cache/
+.ruff_cache/
+Data/releases/
+Data/active_release.json

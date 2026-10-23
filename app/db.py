@@ -28,6 +28,8 @@ engine = create_engine(
     DATABASE_URL,
     future=True,
     pool_pre_ping=True,
+    pool_timeout=5,
+    connect_args={"connect_timeout": 5} if DATABASE_URL.startswith("postgresql") else {},
 )
 
 metadata = MetaData()

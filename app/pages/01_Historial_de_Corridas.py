@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.api_client import api_headers
+
 import os
 
 import pandas as pd
@@ -48,13 +50,13 @@ def render_metric_card(label: str, value: str) -> None:
 
 
 def fetch_runs(api_base_url: str, limit: int = 200) -> list[dict]:
-    response = requests.get(f"{api_base_url}/runs", params={"limit": limit}, timeout=30)
+    response = requests.get(headers=api_headers(), url=f"{api_base_url}/runs", params={"limit": limit}, timeout=30)
     response.raise_for_status()
     return response.json()
 
 
 def fetch_run_detail(api_base_url: str, run_id: int) -> dict:
-    response = requests.get(f"{api_base_url}/runs/{run_id}", timeout=30)
+    response = requests.get(headers=api_headers(), url=f"{api_base_url}/runs/{run_id}", timeout=30)
     response.raise_for_status()
     return response.json()["run"]
 

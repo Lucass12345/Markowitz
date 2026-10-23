@@ -17,7 +17,7 @@ def optimize_portfolio(payload: OptimizeRequest) -> OptimizeResponse:
     except OptimizationInputError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Optimization failed: {exc}") from exc
+        raise HTTPException(status_code=500, detail="Optimization failed; consult server logs") from exc
 
 @router.get("/metadata")
 def optimization_metadata():

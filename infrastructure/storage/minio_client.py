@@ -13,11 +13,16 @@ MINIO_SECURE = os.getenv("MINIO_SECURE", "false").lower() == "true"
 
 
 def get_minio_client() -> Minio:
+    endpoint=os.getenv("MINIO_ENDPOINT", MINIO_ENDPOINT)
+    access_key=os.getenv("MINIO_ACCESS_KEY", MINIO_ACCESS_KEY)
+    secret_key=os.getenv("MINIO_SECRET_KEY", MINIO_SECRET_KEY)
+    if os.getenv("APP_ENV") == "production" and (not os.getenv("MINIO_ACCESS_KEY") or not os.getenv("MINIO_SECRET_KEY") or access_key == "minioadmin" or secret_key == "minioadmin"):
+        raise ValueError("Production MinIO requires explicit service credentials")
     return Minio(
-        endpoint=MINIO_ENDPOINT,
-        access_key=MINIO_ACCESS_KEY,
-        secret_key=MINIO_SECRET_KEY,
-        secure=MINIO_SECURE,
+        endpoint=endpoint,
+        access_key=access_key,
+        secret_key=secret_key,
+        secure=os.getenv("MINIO_SECURE", "false").lower() == "true",
     )
 
 

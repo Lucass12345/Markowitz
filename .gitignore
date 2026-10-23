@@ -12,3 +12,7 @@ outputs/backtesting/
 storage/optimization_snapshots/
 Data/releases/
 Data/active_release.json
+
+.env.production
+backups/
+.ruff_cache/

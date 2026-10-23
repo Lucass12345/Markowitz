@@ -20,4 +20,6 @@ def job_status(job_id:str):
         raise HTTPException(status_code=404,detail='Job not found')
     # Tracebacks remain in the database for operator diagnosis.
     result.pop('technical_error',None)
+    if result.get('error_status') == 500:
+        result['error'] = 'Optimization failed; consult persisted technical error using the job ID'
     return result

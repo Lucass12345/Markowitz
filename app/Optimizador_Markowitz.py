@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.api_client import api_headers
+
 import os
 import json
 from pathlib import Path
@@ -250,7 +252,7 @@ def build_block_exposure_chart(exposure_df: pd.DataFrame) -> go.Figure:
 
 @st.cache_data(show_spinner=False, ttl=30)
 def check_api_health(api_base_url: str) -> dict:
-    response = requests.get(f"{api_base_url}/health", timeout=15)
+    response = requests.get(headers=api_headers(), url=f"{api_base_url}/health", timeout=15)
     response.raise_for_status()
     return response.json()
 
@@ -275,7 +277,7 @@ def call_optimize_api(
     }
 
     payload.update(optimization_options or {})
-    response = requests.post(
+    response = requests.post(headers=api_headers(), url=
         f"{api_base_url}/jobs",
         json=payload,
         timeout=15,
@@ -313,6 +315,7 @@ def sidebar_controls() -> dict:
     api_base_url = st.sidebar.text_input(
         "URL base de la API",
         value=API_BASE_URL,
+        disabled=os.getenv("APP_ENV") == "production",
         help="URL del backend FastAPI.",
     )
 
@@ -325,7 +328,7 @@ def sidebar_controls() -> dict:
 
     st.sidebar.markdown("### Objetivos por bloque")
     try:
-        response = requests.get(f"{api_base_url}/optimize/metadata", timeout=10)
+        response = requests.get(headers=api_headers(), url=f"{api_base_url}/optimize/metadata", timeout=10)
         response.raise_for_status()
         metadata = response.json()
         targets_default = metadata["default_targets"]
@@ -433,7 +436,7 @@ def poll_optimization_job(api_base_url):
     if not job_id:
         return
     try:
-        response = requests.get(f"{api_base_url}/jobs/{job_id}", timeout=10)
+        response = requests.get(headers=api_headers(), url=f"{api_base_url}/jobs/{job_id}", timeout=10)
         response.raise_for_status()
         job = response.json()
     except requests.RequestException as exc:
