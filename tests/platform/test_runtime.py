@@ -119,6 +119,17 @@ def test_concurrent_delivery_has_one_claim_owner(database):
     assert service.get(identity)['attempts']==1
 
 
+def test_manual_retry_preserves_pins_and_can_resume_publication(database):
+    service=JobService(database)
+    identity=service.submit('model.train',{'dataset_version':'immutable-v1','family':'lstm'})['id']
+    service.claim(identity,'worker');service.finish(identity,'worker',error=ValueError('interrupted'))
+    retried=service.retry(identity,'operator')
+    assert retried['id']==identity and retried['payload_json']['dataset_version']=='immutable-v1'
+    assert retried['status']=='pending' and not retried['cancel_requested']
+    assert service.claim(identity,'retry-worker')['attempts']==2
+    with pytest.raises(ConflictError):service.retry(identity)
+
+
 def test_inference_reference_and_completed_experiment_commit_together(database,tmp_path,monkeypatch):
     from sqlalchemy import insert
     import src.platform.registry as module

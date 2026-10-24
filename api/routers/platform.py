@@ -180,6 +180,21 @@ def backtests(request:Request,dataset_version:str|None=None):return _experiment_
 @router.get('/backtests/{identity}')
 def backtest_result(identity:str,request:Request):return _experiment_detail(request,identity)
 
+@router.get('/history/legacy')
+def legacy_history(request:Request,limit:int=Query(100,ge=1,le=500)):
+    from app.db import optimization_runs
+    with database(request).connect() as conn:
+        records=conn.execute(select(optimization_runs).order_by(optimization_runs.c.id.desc()).limit(limit)).mappings()
+        return {'items':[to_builtin(dict(row)) for row in records]}
+
+@router.get('/history/legacy/{identity}')
+def legacy_run(identity:int,request:Request):
+    from app.db import optimization_runs
+    with database(request).connect() as conn:
+        row=conn.execute(select(optimization_runs).where(optimization_runs.c.id==identity)).mappings().first()
+    if not row:raise NotFoundError('Historical optimization not found')
+    return {**to_builtin(dict(row)),'historical':True,'metrics_policy':'stored_original_values'}
+
 @router.get('/jobs')
 def jobs(request:Request):
     rows=JobService(database(request)).list_jobs()
@@ -205,6 +220,9 @@ def logs(identity:str,request:Request,after:int=Query(0,ge=0)):return {'items':J
 
 @router.post('/jobs/{identity}/cancel')
 def cancel(identity:str,request:Request):return JobService(database(request)).cancel(identity,actor(request))
+
+@router.post('/jobs/{identity}/retry',status_code=202)
+def retry(identity:str,request:Request):return JobService(database(request)).retry(identity,actor(request))
 
 @router.get('/artifacts/{identity}')
 def artifact(identity:str,request:Request,path:str='platform_result.json'):
@@ -257,7 +275,7 @@ def system(request:Request):
         if seen.tzinfo is None:seen=seen.replace(tzinfo=timezone.utc)
         if seen>db.utcnow()-timedelta(seconds=90):recent.append(worker)
     latest=JobService(connection).list_jobs(20)
-    return {'active_dataset':active,'models':registry(request).list_models(state='active'),'services':services,
+    return {'actor':{'role':actor(request)},'active_dataset':active,'models':registry(request).list_models(state='active'),'services':services,
             'workers':worker_rows,'jobs':[{k:v for k,v in row.items() if k!='technical_error'} for row in latest],
             'alerts':(['No active canonical dataset: import or refresh first'] if not active else [])+(['No recent worker heartbeat'] if not recent else []),
             'presets':{'lstm':{'seq_len':40,'forecast_horizon':5,'target_aggregation':'mean','epochs':50},

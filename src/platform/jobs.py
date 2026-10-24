@@ -132,6 +132,22 @@ class JobService:
             event(conn,job_id,'starting',f'Worker claimed attempt {row["attempts"]+1}')
         return self.get(job_id,technical=True)
 
+    def retry(self, job_id, actor='service'):
+        """Resume the same pinned publication after an operator fixes a failure."""
+        with self.database.begin() as conn:
+            row=conn.execute(select(db.jobs).where(db.jobs.c.id==job_id).with_for_update()).mappings().first()
+            if not row:raise NotFoundError('Job not found')
+            if row['status'] not in {'failed','cancelled'}:
+                raise ConflictError('Only failed or cancelled jobs can be retried')
+            if row['idempotency_key'] is None:
+                raise ConflictError('This job was superseded by a resubmission; retry the newer job')
+            conn.execute(update(db.jobs).where(db.jobs.c.id==job_id).values(status='pending',stage='queued',
+                cancel_requested=False,progress=0,lease_owner=None,lease_until=None,next_attempt_at=None,
+                completed_at=None,error=None,error_status=None,max_attempts=row['attempts']+3))
+            conn.execute(update(db.outbox).where(db.outbox.c.job_id==job_id).values(last_dispatched_at=None))
+            event(conn,job_id,'queued',f'Manual retry by {actor}; original pinned inputs retained')
+        return self.get(job_id)
+
     def finish(self, job_id, owner, result=None, error=None, resources=None):
         now = db.utcnow()
         with self.database.begin() as conn:

@@ -188,3 +188,27 @@ def test_readiness_supports_initial_bootstrap_without_active_dataset(platform, m
     assert response.status_code == 200, response.text
     assert response.json()['checks'] == {'database': True, 'broker': True, 'artifacts': True}
     assert platform.client.get('/api/v1/datasets').json()['items'] == []
+
+
+def test_scheduled_refresh_keeps_the_active_dataset_universe(platform):
+    from src.platform.operations import pin_request
+    publish(platform)
+    payload=pin_request('dataset.refresh',{'activate':True},platform.engine,platform.store)
+    assert payload['dataset_version']=='v1'
+    assert [asset['ticker'] for asset in payload['universe_snapshot']['assets_json']]==['AAA','BBB']
+    assert all(asset['block']=='OTHER' for asset in payload['universe_snapshot']['assets_json'])
+
+
+def test_legacy_history_is_visible_without_recomputing_stored_metrics(platform):
+    from app.db import metadata,optimization_runs
+    from sqlalchemy import insert
+    metadata.create_all(platform.engine)
+    with platform.engine.begin() as connection:
+        connection.execute(insert(optimization_runs).values(id=7,model_type='classic',max_weight=.15,
+            rf_annual_simple=0,n_frontier_points=80,targets_json={'US':1},metrics_json={'sharpe_annual':.12},
+            comparison_json={},block_exposure_json={},weights_json={},frontier_json={}))
+    assert platform.client.get('/api/v1/history/legacy').json()['items'][0]['id']==7
+    row=platform.client.get('/api/v1/history/legacy/7').json()
+    assert row['metrics_json']=={'sharpe_annual':.12}
+    assert row['historical'] is True
+    assert platform.client.get('/api/v1/history/legacy/8').status_code==404

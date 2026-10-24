@@ -67,8 +67,8 @@ def render_history(api, system, datasets):
     st.caption('Registro persistente de configuraciones, métricas, estado de publicación y artefactos. Las consultas se resuelven por API.')
     version = dataset_selector(datasets, system, key='history_dataset')
     params = {'dataset_version': version} if version else {}
-    tabs = st.tabs(['Optimizaciones', 'Experimentos', 'Backtests', 'Trabajos'])
-    for tab, path, label in zip(tabs, ['/optimizations', '/experiments', '/backtests', '/jobs'], ['optimización', 'experimento', 'backtest', 'trabajo']):
+    tabs = st.tabs(['Optimizaciones', 'Experimentos', 'Backtests', 'Trabajos', 'Histórico académico'])
+    for tab, path, label in zip(tabs, ['/optimizations', '/experiments', '/backtests', '/jobs','/history/legacy'], ['optimización', 'experimento', 'backtest', 'trabajo','histórico']):
         with tab:
             rows = items(fetch(api, path, {'items': []}, **params))
             if not rows:
@@ -85,6 +85,8 @@ def render_history(api, system, datasets):
             if path == '/jobs':
                 if st.button('Consultar logs del trabajo', key='history_job_logs'):
                     _table(fetch(api, f'/jobs/{quote(str(selected), safe="")}/logs', {'items': []}))
+            elif path=='/history/legacy':
+                st.caption('Valores históricos conservados sin recalcular. Las nuevas corridas guardan Sharpe diario y anual por separado.')
             else:
                 artifact_downloads(api, detail, key=f'history_{label}_artifacts')
 
@@ -124,6 +126,12 @@ def render_system(api, system, datasets):
                 try:
                     api.post(f'/jobs/{quote(str(selected), safe="")}/cancel')
                     st.info('Cancelación solicitada; el worker la aplicará en un punto seguro.')
+                except APIError as exc:
+                    st.error(str(exc))
+            if st.button('Reintentar con las mismas versiones',disabled=readonly(system) or job.get('status') not in {'failed','cancelled'},key='system_retry'):
+                try:
+                    api.post(f'/jobs/{quote(str(selected),safe="")}/retry')
+                    st.success('Reintento encolado con el dataset y los modelos originales.')
                 except APIError as exc:
                     st.error(str(exc))
     with tabs[3]:
