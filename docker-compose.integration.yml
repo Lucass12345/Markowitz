@@ -1,0 +1,146 @@
+# Isolated real-service CI stack. Run with docker-compose.yml and a distinct
+# project name; all state is owned by that project and removed by down --volumes.
+x-integration-environment: &integration-environment
+  APP_ENV: integration
+  CODE_VERSION: ${CODE_VERSION:-integration-ci}
+  DATABASE_URL: postgresql+psycopg2://integration_user:integration_database_password@postgres:5432/markowitz_integration
+  CELERY_BROKER_URL: redis://redis:6379/0
+  MLFLOW_TRACKING_URI: http://mlflow:5000
+  MLFLOW_EXPERIMENT_NAME: markowitz-platform-integration
+  PLATFORM_MLFLOW_REQUIRED: "true"
+  MINIO_ENDPOINT: minio:9000
+  MINIO_ACCESS_KEY: integration_minio_user
+  MINIO_SECRET_KEY: integration_minio_password
+  MINIO_SECURE: "false"
+  PLATFORM_ARTIFACT_BUCKET: markowitz-integration-artifacts
+  MARKOWITZ_API_KEY: integration-admin-key-for-ci-only
+  MARKOWITZ_READ_API_KEY: integration-reader-key-for-ci-only
+  CORS_ALLOWED_ORIGINS: http://localhost
+  PLATFORM_CPU_THREADS: "1"
+  OMP_NUM_THREADS: "1"
+  MKL_NUM_THREADS: "1"
+  OPENBLAS_NUM_THREADS: "1"
+  PYTHONDONTWRITEBYTECODE: "1"
+  PYTHONHASHSEED: "0"
+  MPLCONFIGDIR: /tmp/matplotlib
+  XDG_CACHE_HOME: /tmp/cache
+  OPTIMIZATION_SNAPSHOT_DIR: /tmp/optimization_snapshots
+  YAHOO_REFRESH_ENABLED: "false"
+  RUN_PLATFORM_INTEGRATION: "1"
+
+services:
+  postgres:
+    container_name: !reset null
+    environment:
+      POSTGRES_DB: markowitz_integration
+      POSTGRES_USER: integration_user
+      POSTGRES_PASSWORD: integration_database_password
+    ports: !reset []
+    volumes: !override
+      - integration_postgres:/var/lib/postgresql/data
+
+  redis:
+    container_name: !reset null
+    ports: !reset []
+    volumes: !override
+      - integration_redis:/data
+
+  minio:
+    container_name: !reset null
+    environment:
+      MINIO_ROOT_USER: integration_minio_user
+      MINIO_ROOT_PASSWORD: integration_minio_password
+    ports: !reset []
+    volumes: !override
+      - integration_minio:/data
+
+  mlflow:
+    container_name: !reset null
+    ports: !reset []
+    volumes: !override
+      - integration_mlflow:/mlflow
+
+  init-integration-report:
+    image: busybox:1.37.0
+    user: "0:0"
+    restart: "no"
+    command: [sh, -c, "chmod 0770 /integration && chown 10001:10001 /integration"]
+    volumes:
+      - integration_report:/integration
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    cap_add: [CHOWN, FOWNER]
+
+  fastapi:
+    container_name: !reset null
+    user: "10001:10001"
+    environment: *integration-environment
+    ports: !reset []
+    volumes: !override
+      - integration_report:/integration
+    read_only: true
+    tmpfs: !override
+      - /tmp:rw,nosuid,nodev,mode=1777,size=1073741824
+      - /apprepo/storage:rw,nosuid,nodev,uid=10001,gid=10001,mode=0700,size=67108864
+    depends_on: !override
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      mlflow:
+        condition: service_healthy
+      init-integration-report:
+        condition: service_completed_successfully
+
+  worker:
+    container_name: !reset null
+    user: "10001:10001"
+    command: [celery, -A, "worker.celery_app:app", worker, -Q, cpu, -c, "1"]
+    environment: *integration-environment
+    ports: !reset []
+    volumes: !override
+      - integration_report:/integration
+    read_only: true
+    tmpfs: !override
+      - /tmp:rw,nosuid,nodev,mode=1777,size=1073741824
+      - /apprepo/storage:rw,nosuid,nodev,uid=10001,gid=10001,mode=0700,size=67108864
+    depends_on: !override
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      mlflow:
+        condition: service_healthy
+      init-integration-report:
+        condition: service_completed_successfully
+
+  scheduler:
+    container_name: !reset null
+    user: "10001:10001"
+    environment: *integration-environment
+    ports: !reset []
+    volumes: !override []
+    read_only: true
+    tmpfs: !override
+      - /tmp:rw,nosuid,nodev,mode=1777,size=1073741824
+      - /apprepo/storage:rw,nosuid,nodev,uid=10001,gid=10001,mode=0700,size=67108864
+    depends_on: !override
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      mlflow:
+        condition: service_healthy
+
+volumes:
+  integration_postgres:
+  integration_redis:
+  integration_minio:
+  integration_mlflow:
+  integration_report:

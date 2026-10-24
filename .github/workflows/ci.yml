@@ -12,14 +12,62 @@ jobs:
       DATABASE_URL: sqlite:////tmp/markowitz-ci.db
       MPLCONFIGDIR: /tmp/matplotlib
       PYTHONHASHSEED: '0'
+      CODE_VERSION: ${{ github.sha }}
+      RUN_PLATFORM_INTEGRATION: '0'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: pip
-      - run: pip install torch==2.6.0 --index-url https://download.pytorch.org/whl/cpu
-      - run: pip install -r requirements.txt pytest==8.3.5 httpx==0.28.1 ruff==0.11.13
-      - run: ruff check src api app tests --select E9,F63,F7,F82,F821
-      - run: python -m compileall -q src api app scripts
-      - run: python -m pytest -q
+      - run: python -m pip install torch==2.6.0 --index-url https://download.pytorch.org/whl/cpu
+      - run: python -m pip install -r requirements-dev.txt
+      - run: ruff check src api app worker tests --select E9,F63,F7,F82,F821
+      - run: python -m compileall -q src api app worker scripts
+      - run: python -m pytest -q --ignore=tests/integration
+
+  integration:
+    needs: test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      COMPOSE_PROJECT_NAME: markowitz-integration
+      COMPOSE_FILE: docker-compose.yml:docker-compose.integration.yml
+      CODE_VERSION: ${{ github.sha }}
+      RUN_PLATFORM_INTEGRATION: '1'
+      PYTHONHASHSEED: '0'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and start platform services
+        run: >-
+          docker compose up -d --build --wait --wait-timeout 240
+          postgres redis minio mlflow fastapi worker scheduler
+      - name: Verify durable jobs and model workflows
+        run: >-
+          docker compose exec -T fastapi python scripts/platform_integration.py
+          --phase before-restart --state /integration/state.json
+      - name: Restart API and worker
+        run: |
+          docker compose restart fastapi worker
+          docker compose up -d --wait --wait-timeout 180 fastapi worker
+      - name: Verify state and published artifacts survive restart
+        run: >-
+          docker compose exec -T fastapi python scripts/platform_integration.py
+          --phase after-restart --state /integration/state.json
+      - name: Collect integration report
+        if: always()
+        continue-on-error: true
+        run: docker compose cp fastapi:/integration/report.json ./integration-report.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: platform-integration-report
+          path: integration-report.json
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Show service logs after failure
+        if: failure()
+        run: docker compose logs --no-color --tail=150 fastapi worker scheduler postgres redis mlflow
+      - name: Stop platform services
+        if: always()
+        run: docker compose down --volumes --remove-orphans

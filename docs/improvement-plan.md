@@ -121,3 +121,39 @@ como OTHER; los objetivos legacy con GOLD se rechazaron correctamente. La verifi
 asignó explícitamente 10% a OTHER, sin cambiar metadata ni resultados guardados. Sus métricas
 son estimaciones ex ante, no rendimiento OOS. El backtest de demostración sigue sin ser
 suficiente para declarar superioridad predictiva.
+
+## Evolución Platform V2 — 2026-10-24
+
+La rama de mejoras fue integrada en `main` por PR #6 (`df33bb8`); esta evolución
+parte de esa versión y conserva los resultados académicos y módulos financieros.
+La descripción anterior de cola en memoria corresponde al despliegue previo.
+
+Se incorporan servicios bajo `src/platform/`, FastAPI `/api/v1`, Celery/Redis y
+scheduler independiente con outbox SQL y leases. Streamlit queda como consumidor
+de API. PostgreSQL mantiene nuevas tablas `platform_*` de forma aditiva; MinIO es
+canónico para datasets, pesos, preprocesamiento y reportes. MLflow es obligatorio
+para publicar experimentos por defecto. La activación de modelos es una operación
+separada, sujeta a evidencia de validación y verificación de artefactos.
+
+El dataset se fija al crear el job y el universo/modelos se capturan en la solicitud.
+El import explícito migra una copia verificable del legado; no reescribe los CSV,
+modelos ni corridas anteriores. Las rutas antiguas de optimización ahora encolan
+jobs y devuelven 202. El historial anterior sigue disponible en `/runs`; el nuevo
+registro se consulta bajo `/api/v1`.
+
+La actualización Yahoo usa revisión incremental, refresh completo periódico y
+publicación validada con rollback. LSTM/MLP/GARCH reutilizan los entrenadores
+existentes en workers, guardando artefactos completos. El backtest compartido
+compara siete estrategias con restricciones, costos y entrenamiento temporal por
+fold. El frontend agrega las ocho áreas de investigación con datos de FastAPI.
+
+La configuración Docker separa UI, API, CPU/GPU workers, scheduler, broker, SQL,
+MLflow y MinIO. Adminer queda en desarrollo y producción exige secretos propios.
+La integración preparada entrena modelos reducidos con servicios reales, verifica
+artefactos y estados y reinicia API/worker. En este entorno el daemon Docker denegó
+acceso al socket: la integración distribuida y CUDA no se consideran validadas por
+la existencia de ese harness. Los resultados concretos de pruebas y CI deben
+registrarse al cerrar la verificación.
+
+Documentación vigente: [arquitectura y migración](platform-architecture.md),
+[despliegue y operación](platform-deployment.md), [datos y modelos](dynamic-models.md).
