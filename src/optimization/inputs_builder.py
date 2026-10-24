@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[2]
 PRED_DIR = ROOT / "outputs" / "predictions"
 LSTM_DIR_ACC_MIN = .52
 LSTM_AMP_RATIO_MIN = .15
+_UNSET_PREDICTIONS = object()
 
 
 def _read_prediction_csv(filename):
@@ -58,6 +59,14 @@ def _pinned_signals(mode, returns):
     return _load_signals(mode)
 
 
+def _explicit_or_pinned(value, mode, returns):
+    if value is _UNSET_PREDICTIONS:
+        return _pinned_signals(mode, returns)
+    if value is None:
+        return pd.DataFrame()
+    return value.copy() if isinstance(value, pd.DataFrame) else pd.DataFrame(value)
+
+
 def _build_ai_vol_cov(historical_cov, pred_vol):
     historical_vol = np.sqrt(np.diag(historical_cov))
     corr = historical_cov / np.outer(historical_vol, historical_vol)
@@ -69,7 +78,7 @@ def _finite_metric(row, key):
     return float(value) if value is not None and np.isfinite(value) else None
 
 
-def build_model_inputs(model_type, returns, risk_config=None, prediction_fallback="historical", max_prediction_age_days=7, covariance_estimator=None, lstm_direction_min=.52, lstm_amplitude_min=.15):
+def build_model_inputs(model_type, returns, risk_config=None, prediction_fallback="historical", max_prediction_age_days=7, covariance_estimator=None, lstm_direction_min=.52, lstm_amplitude_min=.15, return_predictions=_UNSET_PREDICTIONS, volatility_predictions=_UNSET_PREDICTIONS):
     model_type = str(model_type).strip().lower()
     if model_type not in {"classic", "ai_returns", "ai_returns_lstm", "ai_volatility"}:
         raise OptimizationInputError(f"Invalid model_type: {model_type}")
@@ -86,7 +95,13 @@ def build_model_inputs(model_type, returns, risk_config=None, prediction_fallbac
     diagnostics["estimator"] = estimator
     mu = returns.mean()
     value_column = "vol_pred" if model_type == "ai_volatility" else "mu_pred"
-    predictions = checked_predictions(_pinned_signals(model_type if model_type != "ai_volatility" or estimator == "gjr_garch" else "classic", returns), returns, value_column)
+    if model_type == "classic" or (model_type == "ai_volatility" and estimator != "gjr_garch"):
+        raw_predictions = pd.DataFrame()
+    elif model_type == "ai_volatility":
+        raw_predictions = _explicit_or_pinned(volatility_predictions, model_type, returns)
+    else:
+        raw_predictions = _explicit_or_pinned(return_predictions, model_type, returns)
+    predictions = checked_predictions(raw_predictions, returns, value_column)
     vol = pd.Series(np.sqrt(np.diag(cov)), index=cov.index)
     signals = []
     for ticker in returns:
@@ -113,7 +128,7 @@ def build_model_inputs(model_type, returns, risk_config=None, prediction_fallbac
                   "dir_acc_val": _finite_metric(row, "dir_acc_val"),
                   "amp_ratio": _finite_metric(row, "amp_ratio")}
         if row is not None:
-            for key in ("model_run_id", "model_source", "dataset_version", "selection_reason", "selection_split"):
+            for key in ("model_run_id", "model_source", "dataset_version", "selection_reason", "selection_split", "registry_model_id", "artifact_uri"):
                 if key in row:
                     signal[key] = str(row[key])
         if row is not None and "selection_policy" in row:
@@ -121,16 +136,16 @@ def build_model_inputs(model_type, returns, risk_config=None, prediction_fallbac
         signals.append(signal)
     if estimator == "gjr_garch":
         if model_type != "ai_volatility":
-            volatility_predictions = checked_predictions(_pinned_signals("ai_volatility", returns), returns, "vol_pred")
+            checked_volatility = checked_predictions(_explicit_or_pinned(volatility_predictions, "ai_volatility", returns), returns, "vol_pred")
             risk_signals = []
             for ticker in returns:
-                row = volatility_predictions.loc[ticker] if ticker in volatility_predictions.index else None
+                row = checked_volatility.loc[ticker] if ticker in checked_volatility.index else None
                 reason = row_reason(row, returns[ticker], "vol_pred", policy)
                 require_or_fallback(ticker, reason, policy)
                 if reason is None:
                     vol[ticker] = float(row.vol_pred)
                 risk_signals.append({"ticker": ticker, "source": "ai" if reason is None else "historical", "reason": reason or "accepted",
-                                     **{key: str(row[key]) for key in ("model_run_id", "model_source", "dataset_version", "as_of") if row is not None and key in row}})
+                                     **{key: str(row[key]) for key in ("model_run_id", "model_source", "dataset_version", "as_of", "registry_model_id", "artifact_uri") if row is not None and key in row}})
             diagnostics["risk_signals"] = risk_signals
         cov = _build_ai_vol_cov(cov, vol)
     cov, final_diagnostics = regularize_covariance(cov, risk_config)
