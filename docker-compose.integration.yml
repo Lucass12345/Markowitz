@@ -8,6 +8,8 @@ x-integration-environment: &integration-environment
   MLFLOW_TRACKING_URI: http://mlflow:5000
   MLFLOW_EXPERIMENT_NAME: markowitz-platform-integration
   PLATFORM_MLFLOW_REQUIRED: "true"
+  NO_PROXY: ${NO_PROXY:-},localhost,127.0.0.1,fastapi,postgres,redis,minio,mlflow
+  no_proxy: ${NO_PROXY:-},localhost,127.0.0.1,fastapi,postgres,redis,minio,mlflow
   MINIO_ENDPOINT: minio:9000
   MINIO_ACCESS_KEY: integration_minio_user
   MINIO_SECRET_KEY: integration_minio_password

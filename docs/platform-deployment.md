@@ -170,6 +170,22 @@ acknowledgement tardío y los duplicados se comprueban en SQL. MinIO y MLflow de
 estar sincronizados antes de completar una publicación requerida; un fallo no
 activa un modelo ni cambia una referencia activa a un bundle parcial.
 
+## Imagen MinIO y volúmenes anteriores
+
+El repositorio público `minio/minio` dejó de servir la imagen fijada. Se conserva
+`RELEASE.2025-04-22T22-12-26Z`, compilando su fuente oficial desde el commit
+`0d7408fc9969caf07de6a8c3a84f9fbb10a6739e`, con SHA-256 del archivo fuente
+verificado en `docker/minio.Dockerfile`. El primer build compila Go; los siguientes
+reutilizan su caché. El formato de objetos y los volúmenes no se transforman.
+
+Las imágenes de MinIO y MLflow usan UID/GID 10001. **Antes de actualizar una
+instalación existente**, respaldar los volúmenes y comprobar su propietario.
+`MINIO_UID`, `MINIO_GID`, `MLFLOW_UID` y `MLFLOW_GID` permiten conservar los UID
+anteriores sin modificar archivos. Para un volumen legado propiedad de root,
+configurar el par correspondiente en `0:0` durante la migración; para volúmenes
+nuevos usar 10001. Cambiar propietarios debe ser una operación de mantenimiento
+explícita, con backup; el arranque no hace `chown` de datos históricos.
+
 ## Integración y límites de esta verificación
 
 CI ejecuta unitarios y un stack aislado definido por

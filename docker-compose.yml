@@ -6,6 +6,8 @@ x-platform-env: &platform-env
   MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI:-http://mlflow:5000}
   MLFLOW_EXPERIMENT_NAME: ${MLFLOW_EXPERIMENT_NAME:-markowitz-platform}
   PLATFORM_MLFLOW_REQUIRED: ${PLATFORM_MLFLOW_REQUIRED:-true}
+  NO_PROXY: ${NO_PROXY:-},localhost,127.0.0.1,fastapi,postgres,redis,minio,mlflow
+  no_proxy: ${NO_PROXY:-},localhost,127.0.0.1,fastapi,postgres,redis,minio,mlflow
   PLATFORM_ARTIFACT_BUCKET: ${PLATFORM_ARTIFACT_BUCKET:-markowitz-artifacts}
   MINIO_ENDPOINT: ${MINIO_ENDPOINT:-minio:9000}
   MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
@@ -98,7 +100,10 @@ services:
       - "127.0.0.1:${ADMINER_PORT:-8081}:8080"
 
   minio:
-    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    user: "${MINIO_UID:-10001}:${MINIO_GID:-10001}"
+    build:
+      context: .
+      dockerfile: docker/minio.Dockerfile
     restart: unless-stopped
     environment:
       MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
@@ -116,6 +121,7 @@ services:
       retries: 20
 
   mlflow:
+    user: "${MLFLOW_UID:-10001}:${MLFLOW_GID:-10001}"
     build:
       context: .
       dockerfile: docker/mlflow.Dockerfile

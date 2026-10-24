@@ -5,6 +5,8 @@ x-proxy-build: &proxy-build
     - proxy_ca
 
 services:
+  minio:
+    build: *proxy-build
   fastapi:
     build: *proxy-build
   streamlit:
