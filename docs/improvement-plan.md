@@ -157,3 +157,9 @@ registrarse al cerrar la verificación.
 
 Documentación vigente: [arquitectura y migración](platform-architecture.md),
 [despliegue y operación](platform-deployment.md), [datos y modelos](dynamic-models.md).
+
+### Evidencia de la integración V2
+
+Suite local: 302 pruebas aprobadas. Backend con servicios reales y reinicio
+verificado en GitHub Actions. Ver [informe de verificación](platform-verification.md),
+con commits, alcance y límites; la UI también dispone de un harness sin mocks.

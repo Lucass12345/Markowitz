@@ -140,6 +140,22 @@ services:
       mlflow:
         condition: service_healthy
 
+  streamlit:
+    user: "10001:10001"
+    environment:
+      APP_ENV: integration
+      API_BASE_URL: http://fastapi:8000
+      MARKOWITZ_API_KEY: integration-admin-key-for-ci-only
+      NO_PROXY: ${NO_PROXY:-},localhost,127.0.0.1,fastapi
+      no_proxy: ${NO_PROXY:-},localhost,127.0.0.1,fastapi
+    ports: !reset []
+    volumes: !override
+      - integration_report:/integration
+    read_only: true
+    tmpfs: !override
+      - /tmp:rw,nosuid,nodev,mode=1777,size=536870912
+      - /apprepo/storage:rw,nosuid,nodev,uid=10001,gid=10001,mode=0700,size=67108864
+
 volumes:
   integration_postgres:
   integration_redis:

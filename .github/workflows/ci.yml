@@ -41,7 +41,7 @@ jobs:
       - name: Build and start platform services
         run: >-
           docker compose up -d --build --wait --wait-timeout 240
-          postgres redis minio mlflow fastapi worker scheduler
+          postgres redis minio mlflow fastapi worker scheduler streamlit
       - name: Verify durable jobs and model workflows
         run: >-
           docker compose exec -T fastapi python scripts/platform_integration.py
@@ -58,11 +58,19 @@ jobs:
         if: always()
         continue-on-error: true
         run: docker compose cp fastapi:/integration/report.json ./integration-report.json
+      - name: Verify Streamlit against real API and workers
+        run: docker compose exec -T streamlit python scripts/platform_ui_integration.py
+      - name: Collect Streamlit integration report
+        if: always()
+        continue-on-error: true
+        run: docker compose cp fastapi:/integration/ui-report.json ./ui-integration-report.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: platform-integration-report
-          path: integration-report.json
+          path: |
+            integration-report.json
+            ui-integration-report.json
           if-no-files-found: ignore
           retention-days: 14
       - name: Show service logs after failure

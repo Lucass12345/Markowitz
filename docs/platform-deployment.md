@@ -207,10 +207,15 @@ docker compose down --volumes --remove-orphans
 
 La limpieza con `--volumes` anterior se limita al proyecto de integración aislado.
 El reporte es evidencia de la ejecución cuando el harness completa ambas fases.
-En este entorno se validaron las configuraciones Compose y las pruebas Python;
-el daemon Docker denegó acceso al socket para UID 1000. No se construyeron imágenes
-ni se ejecutó este stack aquí. Los builds, healthchecks y la integración completa
-deben pasar en CI o en un host con acceso a Docker antes de promocionar.
+CI también inicia Streamlit y ejecuta `scripts/platform_ui_integration.py`: navega
+las ocho áreas y lanza un entrenamiento desde la UI contra la API y el worker
+reales. Guarda `ui-integration-report.json` junto al reporte del backend.
+En este entorno se construyeron las imágenes de API, worker, UI, MLflow y MinIO.
+El driver Docker `vfs` agotó el disco de 32 GB al crear el stack completo; se
+retiraron sólo los contenedores temporales y se conservaron los volúmenes. La
+integración completa con servicios reales sí se ejecutó satisfactoriamente en
+GitHub Actions. Ver [evidencia y límites](platform-verification.md). Una ejecución
+de CI valida ese commit; no equivale a activar modelos ni desplegar producción.
 
 En entornos con proxy HTTPS y CA gestionada, el override
 `docker-compose.proxy.yml` monta el bundle público sólo durante el build:

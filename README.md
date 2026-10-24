@@ -108,3 +108,5 @@ python -m compileall -q src api app worker scripts
 CI incluye una integración con PostgreSQL, Redis, Celery, MLflow y MinIO reales: entrena configuraciones pequeñas de las tres familias, recupera artefactos y verifica persistencia tras reiniciar API/worker. El harness está en `scripts/platform_integration.py`; ver los comandos y el alcance en [despliegue](docs/platform-deployment.md).
 
 En el entorno de implementación Docker denegó acceso al socket. Preparar el workflow no equivale a haber validado el despliegue: los builds, healthchecks y ambas fases de integración deben pasar en CI o en un host habilitado. Los resultados históricos y la verificación de mejoras anteriores se conservan en [el plan de mejoras](docs/improvement-plan.md).
+
+La evidencia ejecutada y sus límites están en [Verificación de Platform 2.0](docs/platform-verification.md).
