@@ -121,12 +121,20 @@ def run_lstm_lab(
     dataset_version: str | None = None,
     lstm_direction_min: float = .52,
     lstm_amplitude_min: float = .15,
+    output_root: Path | None = None,
+    model_root: Path | None = None,
+    run_id: str | None = None,
+    device=None,
+    seed: int = 42,
+    progress=None,
+    check_cancelled=None,
+    manage_threads: bool = True,
 ):
     from src.optimization.predictions import LSTMSelection
     selection = LSTMSelection(lstm_direction_min, lstm_amplitude_min)
     if forecast_horizon != 5:
         raise ValueError("El horizonte de producción es de cinco ruedas bursátiles")
-    dataset_dir = active_data_dir()
+    dataset_dir = active_data_dir() if returns_df is None else Path(returns_df.attrs.get("dataset_dir", ROOT / "Data"))
     dataset_version = dataset_version or dataset_dir.name
     returns = load_returns(data_dir=dataset_dir) if returns_df is None else returns_df.copy()
     if tickers is not None:
@@ -135,9 +143,10 @@ def run_lstm_lab(
     if start_date and start_date != "full":
         returns = returns.loc[start_date:]
 
-    run_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-    run_output_dir = OUTPUT_ROOT / run_id
-    run_model_dir = MODEL_ROOT / run_id
+    run_id = run_id or datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    run_output_dir = Path(output_root if output_root is not None else OUTPUT_ROOT) / run_id
+    run_model_dir = Path(model_root if model_root is not None else MODEL_ROOT) / run_id
+    training_device = torch.device(device) if device is not None else DEVICE
     per_ticker_dir = run_output_dir / "per_ticker"
     curves_dir = run_output_dir / "loss_curves"
 
@@ -151,7 +160,11 @@ def run_lstm_lab(
 
     total_tickers = len(list(returns.columns))
 
-    for ticker in returns.columns:
+    for ticker_number, ticker in enumerate(returns.columns):
+        if check_cancelled:
+            check_cancelled()
+        if progress:
+            progress(100 * ticker_number / max(total_tickers, 1), "lstm_ticker", str(ticker))
         try:
             series = returns[ticker].dropna().astype(float)
 
@@ -159,8 +172,7 @@ def run_lstm_lab(
                 summary_rows.append({"ticker": ticker, "error": "insufficient_history", "n_observations": len(series)})
                 continue
 
-            feat_df = build_lstm_feature_frame(series).dropna()
-            feat_df = select_feature_columns(feat_df, selected_features)
+            feat_df = select_feature_columns(build_lstm_feature_frame(series), selected_features)
 
             common_idx = feat_df.index.intersection(series.index)
             feat_df = feat_df.loc[common_idx]
@@ -214,7 +226,9 @@ def run_lstm_lab(
                                                                   ("returns_only", [selected_features.index("return")])]]
             fitted = fit_candidates(X_train_s, y_train_s, X_val_s, y_val_s,
                                     configs, epochs=epochs, batch_size=batch_size,
-                                    dropout=dropout, patience=patience, device=DEVICE)
+                                    dropout=dropout, patience=patience, device=training_device, seed=seed,
+                                    progress=(lambda pct, stage, message: progress(100 * (ticker_number + .8 * pct / 100) / max(total_tickers, 1), stage, f"{ticker}: {message}")) if progress else None,
+                                    check_cancelled=check_cancelled, manage_threads=manage_threads)
             model = fitted["model"]
             best_val = fitted["best_val"]
             train_losses, val_losses = fitted["train_losses"], fitted["val_losses"]
@@ -224,10 +238,10 @@ def run_lstm_lab(
 
             model.eval()
             with torch.no_grad():
-                pred_train_scaled = model(X_train_t.to(DEVICE)).cpu().numpy()
-                pred_val_scaled = model(X_val_t.to(DEVICE)).cpu().numpy()
-                pred_test_scaled = model(X_test_t.to(DEVICE)).cpu().numpy()
-                last_pred_scaled = model(torch.tensor(latest_X[None], dtype=torch.float32).to(DEVICE)).cpu().numpy()[0]
+                pred_train_scaled = model(X_train_t.to(training_device)).cpu().numpy()
+                pred_val_scaled = model(X_val_t.to(training_device)).cpu().numpy()
+                pred_test_scaled = model(X_test_t.to(training_device)).cpu().numpy()
+                last_pred_scaled = model(torch.tensor(latest_X[None], dtype=torch.float32).to(training_device)).cpu().numpy()[0]
 
             pred_train = inverse_y(pred_train_scaled, y_mean, y_std)
             pred_val = inverse_y(pred_val_scaled, y_mean, y_std)
@@ -261,10 +275,10 @@ def run_lstm_lab(
                 torch.save(model.state_dict(), run_model_dir / f"{ticker}_evaluation.pt")
                 model, x_mean, x_std, y_mean, y_std = refit_deployment(
                     X, y, fitted["config"], epochs=refit_epochs, batch_size=batch_size,
-                    dropout=dropout, device=DEVICE)
+                    dropout=dropout, device=training_device, seed=seed, check_cancelled=check_cancelled)
                 latest_X = (feat_df.iloc[-seq_len:].values.astype(np.float32) - x_mean) / x_std
                 with torch.no_grad():
-                    last_pred = float(model(torch.tensor(latest_X[None], dtype=torch.float32).to(DEVICE)).cpu().item() * y_std + y_mean)
+                    last_pred = float(model(torch.tensor(latest_X[None], dtype=torch.float32).to(training_device)).cpu().item() * y_std + y_mean)
 
             pred_rows.append({
                 "ticker": ticker,
@@ -328,6 +342,8 @@ def run_lstm_lab(
             with open(run_model_dir / f"{ticker}_meta.json", "w", encoding="utf-8") as f:
                 json.dump({
                     "ticker": ticker,
+                    "seed": seed,
+                    "device": str(training_device),
                     "selected_config": fitted["config"],
                     "refit_latest": refit_latest,
                     "refit_epochs": refit_epochs if refit_latest else None,
@@ -357,6 +373,8 @@ def run_lstm_lab(
                 }, f, indent=2)
 
         except Exception as e:
+            if check_cancelled:
+                check_cancelled()
             summary_rows.append({
                 "ticker": ticker,
                 "error": repr(e),
@@ -370,6 +388,8 @@ def run_lstm_lab(
 
     summary = {
         "run_id": run_id,
+        "seed": seed,
+        "device": str(training_device),
         "dataset": str(dataset_dir),
         "total_tickers_in_universe": total_tickers,
         "tickers_with_predictions": int(len(predictions_df)),
@@ -403,8 +423,8 @@ def run_lstm_lab(
         json.dump(summary, f, indent=2)
 
     latest_ptr = ROOT / "outputs" / "lstm_lab" / "latest_run.json"
-    latest_ptr.parent.mkdir(parents=True, exist_ok=True)
     if publish_latest and not predictions_df.empty:
+        latest_ptr.parent.mkdir(parents=True, exist_ok=True)
         latest_ptr.write_text(json.dumps({
             "run_id": run_id,
             "run_output_dir": str(run_output_dir),

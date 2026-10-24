@@ -27,13 +27,16 @@ def forecast_garch_vol(returns):
     return forecast_gjr_garch_vol(returns)
 
 
-def diagnose_garch(returns, horizon=5, test_size=20):
+def diagnose_garch(returns, horizon=5, test_size=20, dist="t", mean="Zero", maxiter=300,
+                   progress=None, check_cancelled=None, include_predictions=False):
     """Refit rolling origins on a held-out tail; realized r² is a noisy variance proxy.
 
     Forecasts at every origin use past observations only. No test tuning is done.
     """
     s = returns.dropna().astype(float)
-    res = fit_gjr(s)
+    if check_cancelled:
+        check_cancelled()
+    res = fit_gjr(s, dist=dist, mean=mean, maxiter=maxiter)
     z = np.asarray(res.std_resid)
     z = z[np.isfinite(z)]
     lag = min(10, len(z) // 5)
@@ -60,13 +63,19 @@ def diagnose_garch(returns, horizon=5, test_size=20):
                variance_sum_5d=float(variances.sum()), vol_5d=float(np.sqrt(variances.sum())))
     realized, predicted, baseline = [], [], []
     failures = []
+    paths = []
     for i in range(max(252, len(s) - test_size), len(s)):
+        if check_cancelled:
+            check_cancelled()
+        if progress:
+            progress(100 * (i - max(252, len(s) - test_size)) / max(test_size, 1), "garch_origin", str(s.index[i]))
         train = s.iloc[:i]
         try:
-            variance, _ = forecast_garch_vol(train)
+            variance, _ = forecast_gjr_garch_vol(train, dist=dist, mean=mean, maxiter=maxiter)
             realized.append(float(s.iloc[i] ** 2))
             predicted.append(variance)
             baseline.append(float(train.pow(2).ewm(alpha=.06, adjust=False).mean().iloc[-1]))
+            paths.append(dict(date=str(s.index[i]), y_true=realized[-1], y_pred=variance, ewma=baseline[-1]))
         except Exception as exc:
             failures.append(dict(date=str(s.index[i]), error=str(exc)))
     def scores(pred):
@@ -78,4 +87,6 @@ def diagnose_garch(returns, horizon=5, test_size=20):
                            garch=scores(predicted) if realized else None,
                            ewma=scores(baseline) if realized else None,
                            proxy="squared daily log returns", horizon=1)
+    if include_predictions:
+        out["backtest"]["predictions"] = paths
     return out

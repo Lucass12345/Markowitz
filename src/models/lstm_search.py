@@ -17,10 +17,12 @@ def default_candidates():
 
 
 def fit_candidates(X_train, y_train, X_val, y_val, candidates, epochs=50,
-                   batch_size=32, dropout=0.2, patience=8, seed=42, device="cpu"):
+                   batch_size=32, dropout=0.2, patience=8, seed=42, device="cpu",
+                   progress=None, check_cancelled=None, manage_threads=True):
     if not candidates or epochs < 1 or patience < 1:
         raise ValueError("Candidates, epochs and patience must be positive")
-    torch.set_num_threads(min(torch.get_num_threads(), 4))
+    if manage_threads:
+        torch.set_num_threads(min(torch.get_num_threads(), 4))
     loader = DataLoader(TensorDataset(torch.as_tensor(X_train, dtype=torch.float32),
                                      torch.as_tensor(y_train, dtype=torch.float32)),
                         batch_size=batch_size, shuffle=False)
@@ -28,7 +30,9 @@ def fit_candidates(X_train, y_train, X_val, y_val, candidates, epochs=50,
     yv = torch.as_tensor(y_val, dtype=torch.float32, device=device)
     best = None
     records = []
-    for config in candidates:
+    for candidate_number, config in enumerate(candidates):
+        if check_cancelled:
+            check_cancelled()
         torch.manual_seed(seed)
         model = ReturnLSTM(input_size=X_train.shape[-1], dropout=dropout,
                            hidden_sizes=config["hidden_sizes"], activation=config["activation"], feature_indices=config.get("feature_indices")).to(device)
@@ -38,7 +42,11 @@ def fit_candidates(X_train, y_train, X_val, y_val, candidates, epochs=50,
         criterion = nn.MSELoss()
         best_loss, state, stale = np.inf, None, 0
         train_losses, val_losses = [], []
-        for _ in range(epochs):
+        for epoch in range(epochs):
+            if check_cancelled:
+                check_cancelled()
+            if progress:
+                progress(100 * (candidate_number + epoch / epochs) / len(candidates), "lstm_epoch", f"candidate {candidate_number + 1}/{len(candidates)}, epoch {epoch + 1}/{epochs}")
             model.train()
             total, count = 0.0, 0
             for xb, yb in loader:
@@ -75,7 +83,8 @@ def fit_candidates(X_train, y_train, X_val, y_val, candidates, epochs=50,
     return best
 
 
-def refit_deployment(X, y, config, epochs, batch_size=32, dropout=.2, seed=42, device="cpu"):
+def refit_deployment(X, y, config, epochs, batch_size=32, dropout=.2, seed=42, device="cpu",
+                     progress=None, check_cancelled=None):
     """After evaluation, train the selected specification on all labeled history.
 
     Fixed epochs from validation early stopping; these weights are never scored on
@@ -96,7 +105,11 @@ def refit_deployment(X, y, config, epochs, batch_size=32, dropout=.2, seed=42, d
     loader = DataLoader(TensorDataset(torch.tensor(xs), torch.tensor(ys)),
                         batch_size=batch_size, shuffle=False)
     model.train()
-    for _ in range(epochs):
+    for epoch in range(epochs):
+        if check_cancelled:
+            check_cancelled()
+        if progress:
+            progress(100 * epoch / max(epochs, 1), "lstm_refit", f"epoch {epoch + 1}/{epochs}")
         for xb, yb in loader:
             optimizer.zero_grad()
             loss = nn.functional.mse_loss(model(xb.to(device)), yb.to(device))

@@ -217,18 +217,19 @@ def build_composite_score(df: pd.DataFrame) -> pd.Series:
     return out
 
 
-def run_mlp_lab(*, start_date: str = "2022-01-01", forecast_horizon: int = 5, target_aggregation: str = "mean", lags: int = 20, short_window: int = 5, long_window: int = 20, hidden_layers = "256,128,64", activation: str = "relu", solver: str = "adam", scaler: str = "standard", alpha: float = 1e-4, learning_rate: str = "adaptive", learning_rate_init: float = 1e-3, max_iter: int = 500, batch_size = "auto", early_stopping: bool = True, validation_fraction: float = 0.15, n_iter_no_change: int = 20, clip_pred: float = 0.02, winsorize_quantile: float = 0.01, include_abs_features: bool = True, include_square_features: bool = True, include_sign_features: bool = True, random_state: int = 42):
+def run_mlp_lab(*, start_date: str = "2022-01-01", forecast_horizon: int = 5, target_aggregation: str = "mean", lags: int = 20, short_window: int = 5, long_window: int = 20, hidden_layers = "256,128,64", activation: str = "relu", solver: str = "adam", scaler: str = "standard", alpha: float = 1e-4, learning_rate: str = "adaptive", learning_rate_init: float = 1e-3, max_iter: int = 500, batch_size = "auto", early_stopping: bool = True, validation_fraction: float = 0.15, n_iter_no_change: int = 20, clip_pred: float = 0.02, winsorize_quantile: float = 0.01, include_abs_features: bool = True, include_square_features: bool = True, include_sign_features: bool = True, random_state: int = 42, returns_df: pd.DataFrame | None = None, dataset_version: str | None = None, output_root: Path | None = None, model_root: Path | None = None, run_id: str | None = None, persist_db: bool = True, publish_latest: bool = True, progress=None, check_cancelled=None):
     if forecast_horizon < 1 or target_aggregation not in {"mean", "sum"}:
         raise ValueError("MLP horizon must be positive and aggregation mean or sum")
-    dataset_dir = active_data_dir()
-    returns = load_returns(data_dir=dataset_dir)
+    dataset_dir = active_data_dir() if returns_df is None else Path(returns_df.attrs.get("dataset_dir", ROOT / "Data"))
+    dataset_version = dataset_version or dataset_dir.name
+    returns = load_returns(data_dir=dataset_dir) if returns_df is None else returns_df.copy()
     if start_date and start_date != "full":
         returns = returns.loc[start_date:]
     hidden_layers_tuple = _parse_hidden_layers(hidden_layers)
 
-    run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
-    run_output_dir = OUTPUT_ROOT / run_id
-    run_model_dir = MODEL_ROOT / run_id
+    run_id = run_id or datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_output_dir = Path(output_root if output_root is not None else OUTPUT_ROOT) / run_id
+    run_model_dir = Path(model_root if model_root is not None else MODEL_ROOT) / run_id
     per_ticker_dir = run_output_dir / "per_ticker"
     run_output_dir.mkdir(parents=True, exist_ok=True)
     run_model_dir.mkdir(parents=True, exist_ok=True)
@@ -238,7 +239,11 @@ def run_mlp_lab(*, start_date: str = "2022-01-01", forecast_horizon: int = 5, ta
     metrics_rows = []
     total_tickers = len(list(returns.columns))
 
-    for ticker in returns.columns:
+    for ticker_number, ticker in enumerate(returns.columns):
+        if check_cancelled:
+            check_cancelled()
+        if progress:
+            progress(100 * ticker_number / max(total_tickers, 1), "mlp_ticker", str(ticker))
         try:
             series = returns[ticker].dropna().astype(float).copy()
             if len(series) < max(long_window + forecast_horizon + 30, 180):
@@ -292,10 +297,18 @@ def run_mlp_lab(*, start_date: str = "2022-01-01", forecast_horizon: int = 5, ta
                 )),
             ])
             model.fit(X_train, y_train)
+            losses=getattr(getattr(model,'named_steps',{}).get('mlp'),'loss_curve_',[])
+            if losses:
+                curves_dir=run_output_dir/'loss_curves'
+                curves_dir.mkdir(parents=True,exist_ok=True)
+                pd.DataFrame({'epoch':np.arange(1,len(losses)+1),'train_loss':losses}).to_csv(
+                    curves_dir/f'{ticker}_losses.csv',index=False)
             pred_train = model.predict(X_train)
             pred_val = model.predict(X_val)
             pred_test = model.predict(X_test)
-            latest_input = aligned[feature_cols].tail(1)
+            # Future targets exist only for evaluation; inference uses the latest
+            # observed feature row, including the unlabeled horizon at the tail.
+            latest_input = feat_df[feature_cols].dropna().tail(1)
             pred_latest = float(model.predict(latest_input)[0])
             if target_aggregation == "sum":
                 pred_latest /= forecast_horizon
@@ -312,10 +325,13 @@ def run_mlp_lab(*, start_date: str = "2022-01-01", forecast_horizon: int = 5, ta
                 "winsor_lower": winsor_lower, "winsor_upper": winsor_upper,
                 "winsor_train_end": str(pd.Timestamp(winsor_train_end)),
                 "forecast_horizon": forecast_horizon, "target_aggregation": target_aggregation,
+                "feature_columns": feature_cols, "lags": lags, "short_window": short_window, "long_window": long_window,
+                "include_abs_features": include_abs_features, "include_square_features": include_square_features,
+                "include_sign_features": include_sign_features, "clip_pred": clip_pred,
             }, indent=2), encoding="utf-8")
 
             pred_rows.append({"ticker": ticker, "mu_pred": pred_latest,
-                              "dataset_version": dataset_dir.name, "base_currency": "USD",
+                              "dataset_version": dataset_version, "base_currency": "USD",
                               "as_of": str(pd.Timestamp(latest_input.index[-1]).date()),
                               "prediction_units": "daily_log_return", "model_run_id": run_id})
             metrics_train = metric_bundle(y_train, pred_train)
@@ -333,6 +349,8 @@ def run_mlp_lab(*, start_date: str = "2022-01-01", forecast_horizon: int = 5, ta
                 "pred_positive_rate_test": pred_positive_rate(pred_test),
             })
         except Exception:
+            if check_cancelled:
+                check_cancelled()
             continue
 
     predictions_df = pd.DataFrame(pred_rows)
@@ -360,11 +378,12 @@ def run_mlp_lab(*, start_date: str = "2022-01-01", forecast_horizon: int = 5, ta
 
     config = {
         "dataset": str(dataset_dir),
-        "dataset_version": dataset_dir.name,
+        "dataset_version": dataset_version,
         "base_currency": "USD",
         "prediction_units": "daily_log_return",
         "selection_split": "validation",
         "selection_metrics_version": 2,
+        "random_state": random_state,
         "target_overlap_purge": forecast_horizon - 1,
         "winsorization_fit_split": "training",
         "start_date": start_date,
@@ -410,11 +429,13 @@ def run_mlp_lab(*, start_date: str = "2022-01-01", forecast_horizon: int = 5, ta
     (run_output_dir / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
 
     latest_ptr = ROOT / "outputs" / "mlp_lab" / "latest_run.json"
-    latest_ptr.parent.mkdir(parents=True, exist_ok=True)
-    latest_ptr.write_text(json.dumps({"run_id": run_id, "run_output_dir": str(run_output_dir), "run_model_dir": str(run_model_dir)}, indent=2), encoding="utf-8")
+    if publish_latest:
+        latest_ptr.parent.mkdir(parents=True, exist_ok=True)
+        latest_ptr.write_text(json.dumps({"run_id": run_id, "run_output_dir": str(run_output_dir), "run_model_dir": str(run_model_dir)}, indent=2), encoding="utf-8")
 
-    from app.mlp_lab_storage import persist_mlp_lab_run
-    persist_mlp_lab_run(run_id=run_id, summary=summary, predictions_df=predictions_df, metrics_df=metrics_df, run_output_dir=str(run_output_dir), run_model_dir=str(run_model_dir))
+    if persist_db:
+        from app.mlp_lab_storage import persist_mlp_lab_run
+        persist_mlp_lab_run(run_id=run_id, summary=summary, predictions_df=predictions_df, metrics_df=metrics_df, run_output_dir=str(run_output_dir), run_model_dir=str(run_model_dir))
 
     return {
         "run_id": run_id,
