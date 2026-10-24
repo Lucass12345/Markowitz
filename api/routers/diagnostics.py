@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 import requests
-from fastapi import APIRouter
+from fastapi import APIRouter,Request
 from sqlalchemy import select,text
 from app.db import engine,optimization_run_provenance
 from src.config import block_configuration
@@ -62,4 +62,6 @@ def serving_diagnostics():
 
 
 @router.get('')
-def diagnostics():return serving_diagnostics()
+def diagnostics(request:Request):
+    from api.routers.platform import system
+    return system(request)

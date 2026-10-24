@@ -9,6 +9,11 @@ mlruns/
 .env.*
 !.env.production.example
 storage/
+outputs/
+models_artifacts/
+.agents/
+.codex/
+.aws/
 .pytest_cache/
 .ruff_cache/
 Data/releases/

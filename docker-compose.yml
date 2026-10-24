@@ -1,96 +1,247 @@
+# Local development only: administrative ports bind to loopback.
+x-platform-env: &platform-env
+  APP_ENV: development
+  DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg2://markowitz_user:markowitz_pass@postgres:5432/markowitz}
+  CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
+  MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI:-http://mlflow:5000}
+  MLFLOW_EXPERIMENT_NAME: ${MLFLOW_EXPERIMENT_NAME:-markowitz-platform}
+  PLATFORM_MLFLOW_REQUIRED: ${PLATFORM_MLFLOW_REQUIRED:-true}
+  PLATFORM_ARTIFACT_BUCKET: ${PLATFORM_ARTIFACT_BUCKET:-markowitz-artifacts}
+  MINIO_ENDPOINT: ${MINIO_ENDPOINT:-minio:9000}
+  MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+  MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+  MINIO_SECURE: ${MINIO_SECURE:-false}
+  CODE_VERSION: ${CODE_VERSION:-development}
+  PLATFORM_CPU_THREADS: ${PLATFORM_CPU_THREADS:-1}
+  OMP_NUM_THREADS: ${PLATFORM_CPU_THREADS:-1}
+  OPENBLAS_NUM_THREADS: ${PLATFORM_CPU_THREADS:-1}
+  YAHOO_REFRESH_ENABLED: ${YAHOO_REFRESH_ENABLED:-true}
+  YAHOO_REFRESH_INTERVAL_SECONDS: ${YAHOO_REFRESH_INTERVAL_SECONDS:-86400}
+
+x-source-mounts: &source-mounts
+  - ./app:/apprepo/app:ro
+  - ./api:/apprepo/api:ro
+  - ./src:/apprepo/src:ro
+  - ./worker:/apprepo/worker:ro
+  - ./scripts:/apprepo/scripts:ro
+  - ./.streamlit:/apprepo/.streamlit:ro
+
+x-model-mounts: &model-mounts
+  - ./app:/apprepo/app:ro
+  - ./api:/apprepo/api:ro
+  - ./src:/apprepo/src:ro
+  - ./worker:/apprepo/worker:ro
+  - ./scripts:/apprepo/scripts:ro
+  - ./.streamlit:/apprepo/.streamlit:ro
+  - ./Data:/apprepo/Data:ro
+
+x-application: &application
+  restart: unless-stopped
+  init: true
+  user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
+  environment: *platform-env
+  volumes: *source-mounts
+  tmpfs:
+    - /tmp:mode=1777
+    - /apprepo/storage:uid=${LOCAL_UID:-1000},gid=${LOCAL_GID:-1000},mode=0700
+  security_opt: [no-new-privileges:true]
+  cap_drop: [ALL]
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+    minio:
+      condition: service_healthy
+    mlflow:
+      condition: service_healthy
+
 services:
   postgres:
     image: postgres:16.8-bookworm
-    container_name: markowitz_postgres
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-markowitz}
       POSTGRES_USER: ${POSTGRES_USER:-markowitz_user}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-markowitz_pass}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7.4.2-bookworm
+    restart: unless-stopped
+    command: [redis-server, --appendonly, "yes", --appendfsync, everysec]
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 5s
+      timeout: 3s
+      retries: 20
 
   adminer:
     image: adminer:4.8.1
-    container_name: markowitz_adminer
     restart: unless-stopped
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     ports:
-      - "8081:8080"
+      - "127.0.0.1:${ADMINER_PORT:-8081}:8080"
 
   minio:
     image: minio/minio:RELEASE.2025-04-22T22-12-26Z
-    container_name: markowitz_minio
     restart: unless-stopped
     environment:
       MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
     command: server /data --console-address ":9001"
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "127.0.0.1:${MINIO_PORT:-9000}:9000"
+      - "127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001"
     volumes:
       - minio_data:/data
+    healthcheck:
+      test: [CMD, curl, -f, http://localhost:9000/minio/health/live]
+      interval: 5s
+      timeout: 3s
+      retries: 20
 
   mlflow:
     build:
       context: .
       dockerfile: docker/mlflow.Dockerfile
-    container_name: markowitz_mlflow
     restart: unless-stopped
     ports:
-      - "5005:5000"
+      - "127.0.0.1:${MLFLOW_PORT:-5005}:5000"
     volumes:
       - mlflow_data:/mlflow
+    healthcheck:
+      test: [CMD, python, -c, 'import urllib.request; urllib.request.urlopen("http://localhost:5000/health", timeout=3)']
+      interval: 5s
+      timeout: 5s
+      retries: 20
 
   fastapi:
+    <<: *application
+    volumes: *model-mounts
     build:
       context: .
       dockerfile: docker/fastapi.Dockerfile
-    user: "${LOCAL_UID:-0}:${LOCAL_GID:-0}"
-    container_name: markowitz_fastapi
-    restart: unless-stopped
-    depends_on:
-      - postgres
-      - mlflow
-      - minio
+      args:
+        CODE_VERSION: ${CODE_VERSION:-development}
+        TORCH_INDEX_URL: ${TORCH_INDEX_URL:-https://download.pytorch.org/whl/cpu}
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg2://markowitz_user:markowitz_pass@postgres:5432/markowitz}
-      MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI:-http://mlflow:5000}
-      MLFLOW_EXPERIMENT_NAME: ${MLFLOW_EXPERIMENT_NAME:-markowitz-streamlit}
-      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-minio:9000}
-      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
-      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
-      MINIO_SECURE: ${MINIO_SECURE:-false}
+      <<: *platform-env
+      MARKOWITZ_API_KEY: ${MARKOWITZ_API_KEY:-}
+      MARKOWITZ_READ_API_KEY: ${MARKOWITZ_READ_API_KEY:-}
     ports:
-      - "8000:8000"
-    volumes:
-      - .:/apprepo
+      - "127.0.0.1:${API_PORT:-8000}:8000"
+    healthcheck:
+      test: [CMD, python, -c, 'import urllib.request; urllib.request.urlopen("http://localhost:8000/health/ready", timeout=8)']
+      interval: 10s
+      timeout: 10s
+      retries: 20
+      start_period: 30s
+
+  worker:
+    <<: *application
+    volumes: *model-mounts
+    build:
+      context: .
+      dockerfile: docker/worker.Dockerfile
+      args:
+        CODE_VERSION: ${CODE_VERSION:-development}
+        TORCH_INDEX_URL: ${TORCH_INDEX_URL:-https://download.pytorch.org/whl/cpu}
+    command: [celery, -A, "worker.celery_app:app", worker, -Q, cpu, -c, "2"]
+    environment:
+      <<: *platform-env
+      PLATFORM_WORKER_QUEUE: cpu
+      PLATFORM_WORKER_MAX_MEMORY_KB: ${PLATFORM_WORKER_MAX_MEMORY_KB:-4000000}
+    stop_grace_period: 2m
+    healthcheck:
+      test: [CMD, python, -m, worker.healthcheck, worker]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+      start_period: 45s
+
+  scheduler:
+    <<: *application
+    build:
+      context: .
+      dockerfile: docker/worker.Dockerfile
+      args:
+        CODE_VERSION: ${CODE_VERSION:-development}
+        TORCH_INDEX_URL: ${TORCH_INDEX_URL:-https://download.pytorch.org/whl/cpu}
+    command: [python, -m, worker.scheduler]
+    healthcheck:
+      test: [CMD, python, -m, worker.healthcheck, scheduler]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  worker-gpu:
+    <<: *application
+    volumes: *model-mounts
+    profiles: [gpu]
+    build:
+      context: .
+      dockerfile: docker/worker.Dockerfile
+      args:
+        CODE_VERSION: ${CODE_VERSION:-development}
+        TORCH_INDEX_URL: ${TORCH_GPU_INDEX_URL:-https://download.pytorch.org/whl/cu124}
+    command: [celery, -A, "worker.celery_app:app", worker, -Q, gpu, -c, "1"]
+    environment:
+      <<: *platform-env
+      PLATFORM_WORKER_QUEUE: gpu
+      PLATFORM_WORKER_MAX_MEMORY_KB: ${PLATFORM_GPU_WORKER_MAX_MEMORY_KB:-8000000}
+    gpus: all
+    stop_grace_period: 2m
+    healthcheck:
+      test: [CMD, python, -m, worker.healthcheck, worker]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
 
   streamlit:
+    <<: *application
     build:
       context: .
       dockerfile: docker/streamlit.Dockerfile
-    user: "${LOCAL_UID:-0}:${LOCAL_GID:-0}"
-    container_name: markowitz_streamlit
-    restart: unless-stopped
+      args:
+        CODE_VERSION: ${CODE_VERSION:-development}
+        TORCH_INDEX_URL: ${TORCH_INDEX_URL:-https://download.pytorch.org/whl/cpu}
     depends_on:
-      - fastapi
+      fastapi:
+        condition: service_healthy
     environment:
-      API_BASE_URL: ${API_BASE_URL:-http://fastapi:8000}
+      APP_ENV: development
+      API_BASE_URL: http://fastapi:8000
+      MARKOWITZ_API_KEY: ${MARKOWITZ_API_KEY:-}
       MLFLOW_UI_URL: ${MLFLOW_UI_URL:-http://localhost:5005}
       MINIO_CONSOLE_URL: ${MINIO_CONSOLE_URL:-http://localhost:9001}
       STREAMLIT_SERVER_HEADLESS: "true"
-      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg2://markowitz_user:markowitz_pass@postgres:5432/markowitz}
     ports:
-      - "8502:8501"
-    volumes:
-      - .:/apprepo
+      - "127.0.0.1:${STREAMLIT_PORT:-8502}:8501"
+    healthcheck:
+      test: [CMD, python, -c, 'import urllib.request; urllib.request.urlopen("http://localhost:8501/_stcore/health", timeout=3)']
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
 volumes:
   postgres_data:
-  mlflow_data:
+  redis_data:
   minio_data:
+  mlflow_data:

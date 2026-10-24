@@ -1,8 +1,8 @@
-from fastapi import APIRouter
+import os
+from fastapi import APIRouter, Request
 from starlette.responses import JSONResponse
 from sqlalchemy import text
 from app.db import engine
-from src.data.load_data import active_data_dir,assert_usd_dataset
 
 router=APIRouter()
 
@@ -14,17 +14,27 @@ def healthcheck():
 
 
 @router.get('/ready')
-def readiness():
-    checks={'database':False,'dataset':False}
+def readiness(request: Request):
+    # Importing the first snapshot requires a ready API; data availability is
+    # reported separately by the authenticated system diagnostics endpoint.
+    checks={'database':False,'broker':False,'artifacts':False}
     try:
-        with engine.connect() as conn:conn.execute(text('SELECT 1'))
+        with getattr(request.app.state,'platform_database',engine).connect() as conn:conn.execute(text('SELECT 1'))
         checks['database']=True
     except Exception:
         pass
     try:
-        directory=active_data_dir()
-        assert_usd_dataset(directory)
-        checks['dataset']=all((directory/name).is_file() for name in ['returns.csv','assets_metadata.csv'])
+        import redis
+        redis.Redis.from_url(os.getenv('CELERY_BROKER_URL','redis://127.0.0.1:6379/0'),
+                            socket_connect_timeout=1,socket_timeout=1).ping()
+        checks['broker']=True
+    except Exception:
+        pass
+    try:
+        from api.routers.platform import store
+        canonical=store(request)
+        canonical.client.bucket_exists(canonical.bucket)
+        checks['artifacts']=True
     except Exception:
         pass
     ready=all(checks.values())

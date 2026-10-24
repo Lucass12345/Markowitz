@@ -107,8 +107,7 @@ _manager_lock=Lock()
 
 
 def get_manager():
-    global _manager
-    with _manager_lock:
-        if _manager is None:
-            _manager=JobManager()
-    return _manager
+    # Legacy JobManager remains import-compatible for older CLI consumers only.
+    # Serving exclusively dispatches durable, independently executed jobs.
+    from src.platform.compat import DurableManager
+    return DurableManager()

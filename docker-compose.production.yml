@@ -1,4 +1,45 @@
-# Separate deployment. Serve Streamlit through a TLS reverse proxy on the host.
+# Production is standalone; expose Streamlit only through a TLS/SSO reverse proxy.
+x-platform-env: &platform-env
+  APP_ENV: production
+  CODE_VERSION: ${CODE_VERSION:?required}
+  DATABASE_URL: ${DATABASE_URL:?required}
+  CELERY_BROKER_URL: ${CELERY_BROKER_URL:?required}
+  PLATFORM_ARTIFACT_BUCKET: ${PLATFORM_ARTIFACT_BUCKET:-markowitz-artifacts}
+  MINIO_ENDPOINT: minio:9000
+  MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:?required}
+  MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:?required}
+  MINIO_SECURE: "false"
+  MLFLOW_TRACKING_URI: http://mlflow:5000
+  MLFLOW_EXPERIMENT_NAME: ${MLFLOW_EXPERIMENT_NAME:-markowitz-platform}
+  PLATFORM_MLFLOW_REQUIRED: "true"
+  PLATFORM_CPU_THREADS: ${PLATFORM_CPU_THREADS:-1}
+  OMP_NUM_THREADS: ${PLATFORM_CPU_THREADS:-1}
+  OPENBLAS_NUM_THREADS: ${PLATFORM_CPU_THREADS:-1}
+  YAHOO_REFRESH_ENABLED: ${YAHOO_REFRESH_ENABLED:-true}
+  YAHOO_REFRESH_INTERVAL_SECONDS: ${YAHOO_REFRESH_INTERVAL_SECONDS:-86400}
+
+x-application: &application
+  restart: unless-stopped
+  init: true
+  read_only: true
+  user: "10001:10001"
+  environment: *platform-env
+  tmpfs:
+    - /tmp:mode=1777
+    - /apprepo/storage:uid=10001,gid=10001,mode=0700
+  security_opt: [no-new-privileges:true]
+  cap_drop: [ALL]
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+    minio:
+      condition: service_healthy
+    mlflow:
+      condition: service_healthy
+  networks: [backend]
+
 services:
   postgres:
     image: postgres:16.8-bookworm
@@ -13,12 +54,28 @@ services:
       test: [CMD-SHELL, 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
       interval: 10s
       timeout: 5s
-      retries: 10
+      retries: 20
     networks: [backend]
+
+  redis:
+    image: redis:7.4.2-bookworm
+    restart: unless-stopped
+    command: [redis-server, --appendonly, "yes", --appendfsync, everysec, --requirepass, "${REDIS_PASSWORD:?required}"]
+    environment:
+      REDISCLI_AUTH: ${REDIS_PASSWORD:?required}
+    volumes:
+      - redis_prod:/data
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [backend]
+
   minio:
     image: minio/minio:RELEASE.2025-04-22T22-12-26Z
     restart: unless-stopped
-    command: server /data --console-address ':9001'
+    command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:?required}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?required}
@@ -26,71 +83,131 @@ services:
       - minio_prod:/data
     healthcheck:
       test: [CMD, curl, -f, http://localhost:9000/minio/health/live]
-      interval: 15s
+      interval: 10s
       timeout: 5s
-      retries: 10
+      retries: 20
     networks: [backend]
+
   mlflow:
     image: ${MLFLOW_IMAGE:?set a built image tag or digest}
     build:
       context: .
       dockerfile: docker/mlflow.Dockerfile
     restart: unless-stopped
+    read_only: true
+    tmpfs: [/tmp:mode=1777]
     volumes:
       - mlflow_prod:/mlflow
     healthcheck:
       test: [CMD, python, -c, 'import urllib.request; urllib.request.urlopen("http://localhost:5000/health", timeout=3)']
       interval: 15s
       timeout: 5s
-      retries: 10
+      retries: 20
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
     networks: [backend]
+
   fastapi:
+    <<: *application
     image: ${API_IMAGE:?set a built image tag or digest}
     build:
       context: .
       dockerfile: docker/fastapi.Dockerfile
       args:
         CODE_VERSION: ${CODE_VERSION:?required}
-    restart: unless-stopped
-    depends_on:
-      postgres:
-        condition: service_healthy
-      mlflow:
-        condition: service_healthy
-      minio:
-        condition: service_healthy
+        TORCH_INDEX_URL: ${TORCH_INDEX_URL:-https://download.pytorch.org/whl/cpu}
     environment:
-      APP_ENV: production
-      CODE_VERSION: ${CODE_VERSION:?required}
-      DATABASE_URL: ${DATABASE_URL:?required}
+      <<: *platform-env
       MARKOWITZ_API_KEY: ${MARKOWITZ_API_KEY:?required}
       MARKOWITZ_READ_API_KEY: ${MARKOWITZ_READ_API_KEY:-}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:?required}
-      MLFLOW_TRACKING_URI: http://mlflow:5000
-      MINIO_ENDPOINT: minio:9000
-      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:?required}
-      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:?required}
-      OPTIMIZATION_SNAPSHOT_DIR: /apprepo/storage/optimization_snapshots
-      MPLCONFIGDIR: /tmp/matplotlib
     volumes:
       - ${DATA_VOLUME_PATH:?required}:/apprepo/Data:ro
-      - snapshots_prod:/apprepo/storage
     healthcheck:
       test: [CMD, python, -c, 'import urllib.request; urllib.request.urlopen("http://localhost:8000/health/ready", timeout=8)']
       interval: 15s
       timeout: 10s
-      retries: 10
-    security_opt: [no-new-privileges:true]
-    cap_drop: [ALL]
-    networks: [backend]
+      retries: 20
+      start_period: 30s
+
+  worker:
+    <<: *application
+    image: ${WORKER_IMAGE:?set a built image tag or digest}
+    build:
+      context: .
+      dockerfile: docker/worker.Dockerfile
+      args:
+        CODE_VERSION: ${CODE_VERSION:?required}
+        TORCH_INDEX_URL: ${TORCH_INDEX_URL:-https://download.pytorch.org/whl/cpu}
+    command: [celery, -A, "worker.celery_app:app", worker, -Q, cpu, -c, "2"]
+    environment:
+      <<: *platform-env
+      PLATFORM_WORKER_QUEUE: cpu
+      PLATFORM_WORKER_MAX_MEMORY_KB: ${PLATFORM_WORKER_MAX_MEMORY_KB:-4000000}
+    volumes:
+      - ${DATA_VOLUME_PATH:?required}:/apprepo/Data:ro
+    networks: [backend, egress]
+    stop_grace_period: 2m
+    healthcheck:
+      test: [CMD, python, -m, worker.healthcheck, worker]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+      start_period: 45s
+
+  scheduler:
+    <<: *application
+    image: ${WORKER_IMAGE:?set a built image tag or digest}
+    build:
+      context: .
+      dockerfile: docker/worker.Dockerfile
+      args:
+        CODE_VERSION: ${CODE_VERSION:?required}
+        TORCH_INDEX_URL: ${TORCH_INDEX_URL:-https://download.pytorch.org/whl/cpu}
+    command: [python, -m, worker.scheduler]
+    healthcheck:
+      test: [CMD, python, -m, worker.healthcheck, scheduler]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  worker-gpu:
+    <<: *application
+    profiles: [gpu]
+    image: ${GPU_WORKER_IMAGE:-markowitz-worker-gpu:local}
+    build:
+      context: .
+      dockerfile: docker/worker.Dockerfile
+      args:
+        CODE_VERSION: ${CODE_VERSION:?required}
+        TORCH_INDEX_URL: ${TORCH_GPU_INDEX_URL:-https://download.pytorch.org/whl/cu124}
+    command: [celery, -A, "worker.celery_app:app", worker, -Q, gpu, -c, "1"]
+    environment:
+      <<: *platform-env
+      PLATFORM_WORKER_QUEUE: gpu
+      PLATFORM_WORKER_MAX_MEMORY_KB: ${PLATFORM_GPU_WORKER_MAX_MEMORY_KB:-8000000}
+    volumes:
+      - ${DATA_VOLUME_PATH:?required}:/apprepo/Data:ro
+    networks: [backend, egress]
+    gpus: all
+    stop_grace_period: 2m
+    healthcheck:
+      test: [CMD, python, -m, worker.healthcheck, worker]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
   streamlit:
+    <<: *application
     image: ${STREAMLIT_IMAGE:?set a built image tag or digest}
     build:
       context: .
       dockerfile: docker/streamlit.Dockerfile
       args:
         CODE_VERSION: ${CODE_VERSION:?required}
-    restart: unless-stopped
+        TORCH_INDEX_URL: ${TORCH_INDEX_URL:-https://download.pytorch.org/whl/cpu}
     depends_on:
       fastapi:
         condition: service_healthy
@@ -98,27 +215,22 @@ services:
       APP_ENV: production
       API_BASE_URL: http://fastapi:8000
       MARKOWITZ_API_KEY: ${MARKOWITZ_API_KEY:?required}
-      DATABASE_URL: ${DATABASE_URL:?required}
-      STREAMLIT_SERVER_HEADLESS: 'true'
-      MPLCONFIGDIR: /tmp/matplotlib
+      STREAMLIT_SERVER_HEADLESS: "true"
     ports:
-      - '127.0.0.1:8502:8501'
-    volumes:
-      - ${DATA_VOLUME_PATH:?required}:/apprepo/Data:ro
+      - "127.0.0.1:8502:8501"
     healthcheck:
       test: [CMD, python, -c, 'import urllib.request; urllib.request.urlopen("http://localhost:8501/_stcore/health", timeout=3)']
       interval: 15s
       timeout: 5s
       retries: 10
-    security_opt: [no-new-privileges:true]
-    cap_drop: [ALL]
-    networks: [backend,egress]
+
 networks:
   backend:
     internal: true
   egress: {}
+
 volumes:
   postgres_prod:
+  redis_prod:
   minio_prod:
   mlflow_prod:
-  snapshots_prod:

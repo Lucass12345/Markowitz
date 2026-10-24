@@ -1,0 +1,23 @@
+# Optional build-only CA for managed environments with a trusted HTTPS proxy.
+# Supply the combined public trust bundle; it is never copied into image layers.
+x-proxy-build: &proxy-build
+  secrets:
+    - proxy_ca
+
+services:
+  fastapi:
+    build: *proxy-build
+  streamlit:
+    build: *proxy-build
+  worker:
+    build: *proxy-build
+  scheduler:
+    build: *proxy-build
+  worker-gpu:
+    build: *proxy-build
+  mlflow:
+    build: *proxy-build
+
+secrets:
+  proxy_ca:
+    file: ${PROXY_CA_BUNDLE:?set the path to the combined public CA bundle}
